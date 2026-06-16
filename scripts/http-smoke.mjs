@@ -37,6 +37,55 @@ function waitForListening(child) {
   });
 }
 
+function waitForExit(child, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error(`timeout waiting for process exit\n${stderr}`));
+    }, timeoutMs);
+    timer.unref();
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on('exit', (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code, signal, stderr });
+    });
+  });
+}
+
+async function expectHttpTokenRequired(name, overrides = {}) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), `codexpro-http-no-token-${name}-`));
+  const port = await getFreePort();
+  const env = {
+    ...process.env,
+    CODEXPRO_ROOT: root,
+    CODEXPRO_ALLOWED_ROOTS: root,
+    CODEXPRO_HOST: '127.0.0.1',
+    CODEXPRO_PORT: String(port),
+    CODEXPRO_BASH_MODE: 'safe',
+    CODEXPRO_WRITE_MODE: 'handoff',
+    ...overrides
+  };
+  delete env.CODEXPRO_HTTP_TOKEN;
+  delete env.CODEBASE_BRIDGE_HTTP_TOKEN;
+  delete env.CODEXPRO_ALLOW_NO_HTTP_TOKEN;
+
+  const child = spawn('node', ['dist/http.js'], {
+    cwd: path.resolve('.'),
+    env,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const result = await waitForExit(child);
+  if (result.code === 0) {
+    throw new Error(`expected ${name} HTTP server without token to fail closed`);
+  }
+  if (!result.stderr.includes('CODEXPRO_HTTP_TOKEN is required')) {
+    throw new Error(`expected ${name} missing-token failure, got:\n${result.stderr}`);
+  }
+}
+
 async function listTools(url, token) {
   const client = new Client({ name: 'codexpro-http-smoke', version: '0.0.0' });
   const transport = new StreamableHTTPClientTransport(new URL(url), {
@@ -60,6 +109,9 @@ function hasWidgetMeta(tools, name, uri) {
   const meta = tool?._meta ?? {};
   return meta.ui?.resourceUri === uri || meta['openai/outputTemplate'] === uri;
 }
+
+await expectHttpTokenRequired('non-loopback', { CODEXPRO_HOST: '0.0.0.0' });
+await expectHttpTokenRequired('tunnel-mode', { CODEXPRO_TUNNEL_MODE: '1' });
 
 async function withClient(url, fn) {
   const client = new Client({ name: 'codexpro-http-smoke', version: '0.0.0' });

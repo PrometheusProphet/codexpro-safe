@@ -11,6 +11,7 @@ export interface CodexProConfig {
   host: string;
   port: number;
   authToken?: string;
+  requireHttpToken: boolean;
   bashMode: BashMode;
   writeMode: WriteMode;
   inheritEnv: boolean;
@@ -139,6 +140,15 @@ function writeModeFrom(value: string | undefined): WriteMode {
   return "workspace";
 }
 
+function boolFrom(value: string | undefined, fallback = false): boolean {
+  if (value === undefined) return fallback;
+  return ["1", "true", "yes", "y", "on"].includes(value.toLowerCase());
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+
 export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
   const args = parseArgs(argv);
 
@@ -165,13 +175,21 @@ export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
   const bashArg = typeof args.bash === "string" ? args.bash : undefined;
   const writeArg = typeof args.write === "string" ? args.write : undefined;
   const extraBlockedGlobs = splitList(process.env.CODEXPRO_BLOCKED_GLOBS, ",");
+  const host = hostArg ?? process.env.HOST ?? process.env.CODEXPRO_HOST ?? "127.0.0.1";
+  const authToken = process.env.CODEXPRO_HTTP_TOKEN ?? process.env.CODEBASE_BRIDGE_HTTP_TOKEN;
+  const allowNoToken = boolFrom(process.env.CODEXPRO_ALLOW_NO_HTTP_TOKEN, false);
+  const requireHttpToken =
+    boolFrom(process.env.CODEXPRO_REQUIRE_HTTP_TOKEN, false) ||
+    boolFrom(process.env.CODEXPRO_TUNNEL_MODE, false) ||
+    (!isLoopbackHost(host) && !allowNoToken);
 
   return {
     defaultRoot,
     allowedRoots,
-    host: hostArg ?? process.env.HOST ?? process.env.CODEXPRO_HOST ?? "127.0.0.1",
+    host,
     port: numberFrom(portArg ?? process.env.PORT ?? process.env.CODEXPRO_PORT, 8787, 1, 65535),
-    authToken: process.env.CODEXPRO_HTTP_TOKEN ?? process.env.CODEBASE_BRIDGE_HTTP_TOKEN,
+    authToken,
+    requireHttpToken,
     bashMode: bashModeFrom(bashArg ?? process.env.CODEXPRO_BASH_MODE),
     writeMode: writeModeFrom(writeArg ?? process.env.CODEXPRO_WRITE_MODE),
     inheritEnv: process.env.CODEXPRO_INHERIT_ENV === "1",

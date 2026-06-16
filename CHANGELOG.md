@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.1
+
+- Fail closed when HTTP MCP auth is required but `CODEXPRO_HTTP_TOKEN` is missing, including public tunnel mode and non-loopback binds.
+- Block additional safe-bash bypass paths for absolute paths, parent paths, environment expansion, sensitive paths, and `find` write/action flags.
+- Added smoke coverage for the missing-token HTTP startup failure and safe-bash blocked command cases.
+
 ## 0.27.0
 
 - Kept terminal startup focused on only the connector URL and essential controls; usage prompts now belong in README/docs only.

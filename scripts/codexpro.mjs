@@ -75,7 +75,7 @@ Options:
   --copy-url                Copy the ChatGPT Server URL to clipboard. Default for public HTTPS URLs.
   --no-copy-url             Do not copy the Server URL.
   --open-chatgpt            Open ChatGPT connector settings after the URL is ready.
-  --no-auth                 Disable bearer-token auth. Not recommended with tunnels.
+  --no-auth                 Disable bearer-token auth. Only allowed with --tunnel none.
   --log-requests            Print redacted HTTP request and tool-call logs from the local MCP server.
   --print-env               Print the environment used to launch the server.
   --help                    Show this message.
@@ -1692,6 +1692,9 @@ async function main() {
   if (tunnel === 'ngrok' && !stableHostname) {
     throw new Error('--hostname is required with ngrok tunnel mode. Example: codexpro ngrok --hostname your-domain.ngrok-free.dev');
   }
+  if (args.noAuth && tunnel !== 'none') {
+    throw new Error('--no-auth is only allowed with --tunnel none. Public tunnels require CODEXPRO_HTTP_TOKEN.');
+  }
   const mode = optionValue(args, profile, 'mode', ['CODEXPRO_MODE'], 'agent');
   if (!['agent', 'handoff', 'pro'].includes(mode)) {
     throw new Error('--mode must be agent, handoff, or pro');
@@ -1716,7 +1719,8 @@ async function main() {
     CODEXPRO_PORT: port,
     CODEXPRO_BASH_MODE: bash,
     CODEXPRO_WRITE_MODE: write,
-    CODEXPRO_MODE: mode
+    CODEXPRO_MODE: mode,
+    CODEXPRO_TUNNEL_MODE: tunnel === 'none' ? '0' : '1'
   };
   if (args.logRequests || process.env.CODEXPRO_LOG_REQUESTS === '1') serverEnv.CODEXPRO_LOG_REQUESTS = '1';
   if (args.allowHome) serverEnv.CODEXPRO_ALLOW_HOME = '1';

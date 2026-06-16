@@ -242,6 +242,14 @@ function onboardingPage(config: CodexProConfig): string {
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  if (config.requireHttpToken && !config.authToken) {
+    throw new Error(
+      "CODEXPRO_HTTP_TOKEN is required for this HTTP binding. " +
+        "Set CODEXPRO_HTTP_TOKEN, use `codexpro start` to generate one, " +
+        "or set CODEXPRO_ALLOW_NO_HTTP_TOKEN=1 only for a trusted local-only setup."
+    );
+  }
+
   const app = express();
   const logRequests = process.env.CODEXPRO_LOG_REQUESTS === "1";
 
@@ -304,7 +312,8 @@ async function main(): Promise<void> {
       bashMode: config.bashMode,
       writeMode: config.writeMode,
       contextDir: config.contextDir,
-      authEnabled: Boolean(config.authToken)
+      authEnabled: Boolean(config.authToken),
+      authRequired: config.requireHttpToken
     });
   });
 

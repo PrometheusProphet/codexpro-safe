@@ -68,6 +68,7 @@ codexpro start \
 ## Hard Rules
 
 - Do not run public tunnels with `--no-auth`.
+- Public tunnel mode and non-loopback binds fail closed if `CODEXPRO_HTTP_TOKEN` is missing.
 - Do not commit printed connector URLs that include `codexpro_token`.
 - Do not commit Cloudflare tunnel tokens.
 - Use `--mode handoff` for planning workflows where ChatGPT should not edit source files.

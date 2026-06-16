@@ -88,6 +88,16 @@ function hasWidgetMeta(name) {
   const meta = toolsByName.get(name)?._meta ?? {};
   return meta.ui?.resourceUri === toolCardUri || meta['openai/outputTemplate'] === toolCardUri;
 }
+async function expectToolError(name, args, pattern) {
+  const result = await client.request('tools/call', { name, arguments: args });
+  if (!result.isError) {
+    throw new Error(`${name} unexpectedly succeeded`);
+  }
+  const text = result.content?.find?.((part) => part.type === 'text')?.text ?? JSON.stringify(result.structuredContent);
+  if (pattern && !pattern.test(text)) {
+    throw new Error(`${name} error did not match ${pattern}: ${text}`);
+  }
+}
 for (const visualTool of ['write', 'edit', 'export_pro_context', 'handoff_to_codex']) {
   if (!hasWidgetMeta(visualTool)) throw new Error(`${visualTool} should render the CodexPro widget`);
 }
@@ -124,6 +134,10 @@ if (!codexContext.structuredContent.agents_files.includes('AGENTS.md')) throw ne
 if (codexContext.structuredContent.agents_files.length !== 1) throw new Error(`codex_context returned duplicate AGENTS files: ${codexContext.structuredContent.agents_files.join(', ')}`);
 if (!codexContext.content?.[0]?.text?.includes('Smoke Agents')) throw new Error('codex_context did not include AGENTS.md content');
 await client.request('tools/call', { name: 'bash', arguments: { workspace_id: ws, command: 'pwd' } });
+await expectToolError('bash', { workspace_id: ws, command: 'find /tmp' }, /blocked/i);
+await expectToolError('bash', { workspace_id: ws, command: 'find . -fprint leaked.txt' }, /blocked/i);
+await expectToolError('bash', { workspace_id: ws, command: 'git show HEAD:.env' }, /blocked/i);
+await expectToolError('bash', { workspace_id: ws, command: 'ls $HOME' }, /blocked/i);
 const exported = await client.request('tools/call', { name: 'export_pro_context', arguments: { workspace_id: ws, selected_paths: ['demo.txt'], max_files: 4, max_total_bytes: 80000 } });
 if (exported.structuredContent.path !== '.ai-bridge/pro-context.md') throw new Error('export_pro_context wrote an unexpected path');
 await fs.stat(path.join(tmp, '.ai-bridge', 'pro-context.md'));
