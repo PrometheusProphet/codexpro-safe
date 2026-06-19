@@ -58,6 +58,33 @@ function closestExistingParent(absPath: string): string {
   return current;
 }
 
+function existingTraversalPaths(root: string, absPath: string): string[] {
+  const relative = path.relative(root, absPath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return [];
+  const parts = relative.split(path.sep).filter(Boolean);
+  const paths: string[] = [];
+  let current = root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    try {
+      fs.lstatSync(current);
+    } catch {
+      break;
+    }
+    paths.push(current);
+  }
+  return paths;
+}
+
+function isSymlinkPath(absPath: string): boolean {
+  try {
+    const stat = fs.lstatSync(absPath);
+    return stat.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 export class WorkspaceManager {
   private readonly workspaces = new Map<string, Workspace>();
 
@@ -127,6 +154,19 @@ export class PathGuard {
     }
   }
 
+  assertNoSymlinkTraversal(workspace: Workspace, absPath: string, inputPath: string): void {
+    if (this.config.allowSymlinks) return;
+    for (const existingPath of existingTraversalPaths(workspace.root, absPath)) {
+      if (isSymlinkPath(existingPath)) {
+        const rel = displayPath(existingPath, workspace.root);
+        throw new CodexProError(
+          `Path uses a symlink or junction, which is disabled by default: ${rel}. ` +
+            `Set CODEXPRO_ALLOW_SYMLINKS=1 only for trusted workspaces. Requested path: ${inputPath}`
+        );
+      }
+    }
+  }
+
   resolve(workspace: Workspace, inputPath = ".", options: { forWrite?: boolean } = {}): { absPath: string; relPath: string } {
     const expanded = expandHome(inputPath || ".");
     const candidate = path.isAbsolute(expanded) ? expanded : path.join(workspace.root, expanded);
@@ -138,6 +178,7 @@ export class PathGuard {
     }
 
     this.assertNotBlocked(relPath);
+    this.assertNoSymlinkTraversal(workspace, absPath, inputPath);
 
     const realTarget = maybeRealpath(absPath);
     if (realTarget) {

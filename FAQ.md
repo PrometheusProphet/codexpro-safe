@@ -52,10 +52,11 @@ Name: CodexPro
 Description: Local workspace bridge for ChatGPT coding
 Connection: Server URL
 Server URL: paste the URL copied by CodexPro
-Authentication: No Authentication / None
+Authentication: Bearer token
+Token: paste your long workspace token
 ```
 
-The copied Server URL already includes the private CodexPro token.
+CodexPro Safe prefers `Authorization: Bearer <token>`. Temporary compatibility only: if your client cannot send a Bearer token, launch once with `--allow-query-token` or `CODEXPRO_ALLOW_QUERY_TOKEN=1` and use a URL containing `?codexpro_token=...`. Do not save or share that URL; query-token URLs are weaker because tokens can appear in URLs, logs, browser history, screenshots, and copied text.
 
 ## Should CSP stay enabled?
 

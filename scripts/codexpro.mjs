@@ -10,14 +10,21 @@ import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DEFAULT_TUNNEL = 'none';
+const DEFAULT_MODE = 'handoff';
+const DEFAULT_BASH = 'off';
+const DEFAULT_WRITE = 'handoff';
+const DEFAULT_TOOL_MODE = 'standard';
+const DEFAULT_WIDGET_DOMAIN = 'https://rebel0789.github.io';
 
 function usage() {
-  console.log(`CodexPro easy launcher
+  console.log(`codexpro-safe easy launcher
 
 Usage:
-  npm install -g codexpro
-  codexpro setup
-  codexpro start
+  npm install -g codexpro-safe
+  codexpro-safe setup
+  codexpro-safe start
+  codexpro-safe start --root /path/to/repo
   codexpro start --root /path/to/repo
   codexpro settings
   codexpro doctor
@@ -38,8 +45,8 @@ Options:
   --allow-root <dir>        Additional allowed root. Can be repeated.
   --allow-home              Allow opening any workspace under your home directory.
   --mode <agent|handoff|pro>
-                             Default: agent.
-                             agent = ChatGPT can read, write/edit files, search, and run safe bash.
+                             Default: handoff.
+                             agent = ChatGPT can use the coding tools; source writes still require --write workspace.
                              handoff = ChatGPT writes .ai-bridge plans for a local implementation agent.
                              pro = export context for models that cannot call MCP tools.
   --agent                   Shortcut for --mode agent.
@@ -47,9 +54,9 @@ Options:
   --pro-planning            Shortcut for --mode pro.
   --host <host>             Local bind host. Default: 127.0.0.1.
   --port <port>             Local port. Default: 8787.
-  --bash <off|safe|full>    Bash mode. Default: safe.
+  --bash <off|safe|full>    Bash mode. Default: off.
   --write <off|handoff|workspace>
-                             Write mode. Default: workspace in agent mode, handoff otherwise.
+                             Write mode. Default: handoff.
                              handoff = ChatGPT can write .ai-bridge only; Codex edits source.
   --tool-mode <minimal|standard|full>
                              Tool surface exposed to ChatGPT. Default: standard.
@@ -58,7 +65,7 @@ Options:
   --widget-domain <origin>   Dedicated HTTPS origin for ChatGPT widget iframes.
                              Required for app submission. Default: https://rebel0789.github.io.
   --tunnel <none|cloudflare|cloudflare-named|ngrok>
-                             Expose local MCP. Default: cloudflare.
+                             Expose local MCP. Default: none (local-only).
                              cloudflare = quick tunnel with a new URL each restart.
                              cloudflare-named = stable hostname using a named tunnel.
                              ngrok = stable ngrok dev-domain endpoint using --hostname/--url.
@@ -75,15 +82,21 @@ Options:
   --ngrok <path>            ngrok executable. Default: PATH.
   --ngrok-config <path>     Optional ngrok config file path.
   --no-profile              Do not load a saved ~/.codexpro workspace profile.
+  --profile                 Load the saved profile for this workspace.
+                             Setup does not load saved profiles unless this is passed.
+  --use-profile             Alias for --profile.
   --save-config             Save setup choices for this workspace when using setup.
   --no-save-config          Do not save setup choices when using setup.
   --yes                     Confirm settings delete/reset without prompting.
   --install-cloudflared     Install/reinstall cloudflared into ~/.codexpro/bin.
-  --no-install-cloudflared  Do not auto-install cloudflared when missing.
+  --no-install-cloudflared  Compatibility no-op; cloudflared install is opt-in by default.
   --copy-url                Copy the ChatGPT Server URL to clipboard. Default for public HTTPS URLs.
   --no-copy-url             Do not copy the Server URL.
   --open-chatgpt            Open ChatGPT connector settings after the URL is ready.
   --no-auth                 Disable bearer-token auth. Only allowed with --tunnel none.
+  --allow-query-token       Put/accept the auth token in URLs. Off by default; prefer Authorization: Bearer.
+  --allow-symlinks          Allow symlink/junction traversal inside allowed roots. Off by default.
+  --cors-origin <origin>    Additional allowed browser Origin. Can be repeated.
   --log-requests            Print redacted HTTP request and tool-call logs from the local MCP server.
   --print-env               Print the environment used to launch the server.
   --help                    Show this message.
@@ -224,7 +237,7 @@ function profileSummary(profile) {
 
 function profileOneLine(profile, index = 0) {
   const prefix = index ? `${index}. ` : '';
-  const tunnel = profile.tunnel ?? 'cloudflare';
+  const tunnel = profile.tunnel ?? DEFAULT_TUNNEL;
   const host = profile.hostname ? ` -> ${profile.hostname}` : '';
   const port = profile.port ? ` :${profile.port}` : '';
   return `${prefix}${profile.root}  ${tunnel}${host}${port}`;
@@ -235,8 +248,8 @@ function printSavedProfileHint(profile) {
   if (!summary) return;
   printBox('Saved setup found', [
     summary,
-    'From this folder, future launches only need: codexpro start',
-    'Use codexpro setup when you want to change the port, mode, tool mode, tunnel, hostname, or token.'
+    'Use this saved setup for a launch with: codexpro start --profile',
+    'Use codexpro setup --profile only when you intentionally want saved values as setup defaults.'
   ]);
 }
 
@@ -257,12 +270,15 @@ function parseArgs(argv) {
     else if (key === 'no-confirm') out.noConfirm = true;
     else if (key === 'open-chatgpt') out.openChatgpt = true;
     else if (key === 'no-profile') out.noProfile = true;
+    else if (key === 'profile' || key === 'use-profile') out.useProfile = true;
     else if (key === 'save-config') out.saveConfig = true;
     else if (key === 'no-save-config') out.noSaveConfig = true;
     else if (key === 'yes' || key === 'force') out.yes = true;
     else if (key === 'stable') out.tunnel = 'cloudflare-named';
     else if (key === 'install-cloudflared') out.installCloudflared = true;
     else if (key === 'no-install-cloudflared') out.noInstallCloudflared = true;
+    else if (key === 'allow-query-token') out.allowQueryToken = true;
+    else if (key === 'allow-symlinks') out.allowSymlinks = true;
     else if (key === 'agent') {
       const next = argv[i + 1];
       if (next && !next.startsWith('--')) {
@@ -281,6 +297,10 @@ function parseArgs(argv) {
       if (!next || next.startsWith('--')) throw new Error(`Missing value for --${key}`);
       i += 1;
       if (key === 'allow-root') out.allowRoots.push(next);
+      else if (key === 'cors-origin') {
+        if (!out.corsOrigins) out.corsOrigins = [];
+        out.corsOrigins.push(next);
+      }
       else out[key.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = next;
     }
   }
@@ -449,6 +469,10 @@ function stableToken(existing = '') {
   return existing || randomBytes(24).toString('hex');
 }
 
+function envFlag(name) {
+  return ['1', 'true', 'yes', 'y', 'on'].includes(String(process.env[name] ?? '').toLowerCase());
+}
+
 function cloudflaredBinName() {
   return process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
 }
@@ -570,27 +594,26 @@ async function resolveCloudflared(args) {
     throw new Error(`cloudflared was not found at ${explicit}. Remove --cloudflared, install it, or pass a valid path.`);
   }
 
-  if (!args.installCloudflared && commandExists('cloudflared')) {
+  if (commandExists('cloudflared')) {
     try {
       verifyCloudflared('cloudflared');
       return 'cloudflared';
     } catch (error) {
-      console.error(`[codexpro] cloudflared in PATH failed --version; trying local install. ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[codexpro] cloudflared in PATH failed --version. ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   const localPath = localCloudflaredPath();
-  if (!args.installCloudflared && executableFileExists(localPath)) {
+  if (executableFileExists(localPath)) {
     try {
       verifyCloudflared(localPath);
       return localPath;
     } catch (error) {
-      if (args.noInstallCloudflared) return localPath;
-      console.error(`[codexpro] Existing ${localPath} failed --version; reinstalling. ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[codexpro] Existing ${localPath} failed --version. ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  if (args.noInstallCloudflared) return '';
+  if (!args.installCloudflared) return '';
   return installCloudflaredLocal();
 }
 
@@ -760,8 +783,8 @@ function cleanupChildren() {
   for (const child of spawnedChildren) killProcess(child);
 }
 
-function endpointWithToken(endpoint, token) {
-  if (!token) return endpoint;
+function endpointWithToken(endpoint, token, allowQueryToken = false) {
+  if (!token || !allowQueryToken) return endpoint;
   const url = new URL(endpoint);
   url.searchParams.set('codexpro_token', token);
   return url.toString();
@@ -785,7 +808,7 @@ function readTokenFile(filePath) {
 }
 
 function normalizeMode(args) {
-  const mode = args.mode ?? process.env.CODEXPRO_MODE ?? 'agent';
+  const mode = args.mode ?? process.env.CODEXPRO_MODE ?? DEFAULT_MODE;
   if (!['agent', 'handoff', 'pro'].includes(mode)) {
     throw new Error('--mode must be agent, handoff, or pro');
   }
@@ -1416,13 +1439,14 @@ async function runWatchHandoff(argv) {
   }
 }
 
-function createConnectorDetails(endpoint, token, localBase = '') {
-  const serverUrl = endpointWithToken(endpoint, token);
+function createConnectorDetails(endpoint, token, localBase = '', allowQueryToken = false) {
+  const serverUrl = endpointWithToken(endpoint, token, allowQueryToken);
   return {
     endpoint,
     token,
+    allowQueryToken,
     serverUrl,
-    localStatusUrl: localBase ? endpointWithToken(`${localBase}/`, token) : '',
+    localStatusUrl: localBase ? endpointWithToken(`${localBase}/`, token, allowQueryToken) : '',
     chatgptSettingsUrl: 'https://chatgpt.com/#settings/Connectors'
   };
 }
@@ -1434,10 +1458,10 @@ function printCreateAppFields(details) {
   console.log('  Description: Local coding workspace bridge for ChatGPT.');
   console.log('  Connection: Server URL');
   console.log(`  Server URL: ${details.serverUrl}`);
-  console.log('  Authentication: No Authentication / None');
+  console.log(details.token && !details.allowQueryToken ? '  Authentication: Authorization header / Bearer token' : '  Authentication: No Authentication / None');
   console.log('');
   if (details.token) {
-    console.log('If your ChatGPT UI supports custom headers instead, you can use:');
+    console.log(details.allowQueryToken ? 'Query-token URL mode is enabled. Prefer custom headers when your client supports them:' : 'Use this HTTP header when your client supports custom headers:');
     console.log('');
     console.log(`  Authorization: Bearer ${details.token}`);
   } else {
@@ -1446,7 +1470,7 @@ function printCreateAppFields(details) {
 }
 
 function printConnectorBlock(endpoint, token, options = {}) {
-  const details = createConnectorDetails(endpoint, token, options.localBase ?? '');
+  const details = createConnectorDetails(endpoint, token, options.localBase ?? '', Boolean(options.allowQueryToken));
   const { serverUrl } = details;
   const publicHttps = serverUrl.startsWith('https://');
   const shouldCopy = options.copyUrl === true || (options.copyUrl !== false && publicHttps);
@@ -1458,8 +1482,13 @@ function printConnectorBlock(endpoint, token, options = {}) {
   console.log('');
   console.log(paint('bold', 'CodexPro ready'));
   if (options.root) console.log(`  Workspace  ${options.root}`);
-  console.log(`  Mode       ${modeTitle}  tools=${options.toolMode ?? 'standard'}  write=${options.write ?? 'workspace'}  bash=${options.bash ?? 'safe'}`);
+  console.log(`  Mode       ${modeTitle}  tools=${options.toolMode ?? DEFAULT_TOOL_MODE}  write=${options.write ?? DEFAULT_WRITE}  bash=${options.bash ?? DEFAULT_BASH}`);
   console.log(`  Connector  ${publicHttps ? 'public HTTPS' : 'local HTTP'}`);
+  if (token && !options.allowQueryToken) {
+    console.log('  Auth       Authorization: Bearer <token>');
+  } else if (token && options.allowQueryToken) {
+    console.log('  Auth       query-token URL enabled');
+  }
   if (copied.ok) {
     console.log(`  URL        copied with ${copied.command}`);
   } else if (shouldCopy) {
@@ -1475,9 +1504,11 @@ function printConnectorBlock(endpoint, token, options = {}) {
     statusLine(opened ? 'ok' : 'warn', opened ? 'Opened ChatGPT connector settings' : 'Could not open ChatGPT automatically');
   }
   console.log('');
-  console.log('Next: press Enter to open ChatGPT, paste the copied Server URL, choose Authentication: None.');
+  console.log(token && !options.allowQueryToken
+    ? 'Next: press Enter to open ChatGPT, paste the Server URL, and configure Authorization: Bearer token if supported.'
+    : 'Next: press Enter to open ChatGPT, paste the copied Server URL, choose Authentication: None.');
   console.log('Keys: Enter open | c copy | o status | h help | q quit');
-  return { ...details, copied, opened, mode, toolMode: options.toolMode ?? 'standard' };
+  return { ...details, copied, opened, mode, toolMode: options.toolMode ?? DEFAULT_TOOL_MODE };
 }
 
 function printControlHelp() {
@@ -1497,7 +1528,9 @@ function printControlHelp() {
 function printModeHelp() {
   console.log('');
   console.log('Modes');
-  console.log('  codexpro start                 agent mode: read/write/edit/search/bash');
+  console.log('  codexpro start                 handoff mode: local-only, bash off, source writes blocked');
+  console.log('  codexpro start --agent --write workspace --bash safe');
+  console.log('                                 explicit coding mode for trusted repos');
   console.log('  codexpro start --mode handoff  planning-only .ai-bridge handoff');
   console.log('  codexpro start --mode pro      export context for models without MCP tools');
   console.log('  codexpro start --tool-mode minimal   expose only the tight coding loop');
@@ -1565,15 +1598,15 @@ async function runDoctor(argv) {
   }
 
   const root = realDir(args.root ?? process.env.CODEXPRO_ROOT ?? process.cwd());
-  const profile = args.noProfile ? {} : loadWorkspaceProfile(root);
+  const profile = args.useProfile && !args.noProfile ? loadWorkspaceProfile(root) : {};
   const effectiveArgs = { ...profile, ...args };
-  const tunnel = optionValue(args, profile, 'tunnel', ['CODEXPRO_TUNNEL'], 'cloudflare');
+  const tunnel = optionValue(args, profile, 'tunnel', ['CODEXPRO_TUNNEL'], DEFAULT_TUNNEL);
   const host = optionValue(args, profile, 'host', ['CODEXPRO_HOST'], '127.0.0.1');
   const port = String(optionValue(args, profile, 'port', ['CODEXPRO_PORT'], '8787'));
-  const mode = optionValue(args, profile, 'mode', ['CODEXPRO_MODE'], 'agent');
-  const bash = optionValue(args, profile, 'bash', ['CODEXPRO_BASH_MODE'], 'safe');
-  const write = optionValue(args, profile, 'write', ['CODEXPRO_WRITE_MODE'], mode === 'agent' ? 'workspace' : 'handoff');
-  const toolMode = optionValue(args, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], 'standard');
+  const mode = optionValue(args, profile, 'mode', ['CODEXPRO_MODE'], DEFAULT_MODE);
+  const bash = optionValue(args, profile, 'bash', ['CODEXPRO_BASH_MODE'], DEFAULT_BASH);
+  const write = optionValue(args, profile, 'write', ['CODEXPRO_WRITE_MODE'], DEFAULT_WRITE);
+  const toolMode = optionValue(args, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], DEFAULT_TOOL_MODE);
   const stableHostname = args.hostname
     ?? args.url
     ?? process.env.CODEXPRO_PUBLIC_HOSTNAME
@@ -1607,9 +1640,9 @@ async function runDoctor(argv) {
   ]);
 
   record(compareMajorVersion(process.versions.node, 20) ? 'ok' : 'fail', 'Node', `v${process.versions.node} (requires >=20)`);
-  record(fs.existsSync(httpPath) && fs.existsSync(serverPath) ? 'ok' : 'fail', 'Build artifacts', fs.existsSync(httpPath) ? 'dist ready' : 'missing dist/http.js; run npm install && npm run build');
+  record(fs.existsSync(httpPath) && fs.existsSync(serverPath) ? 'ok' : 'fail', 'Build artifacts', fs.existsSync(httpPath) ? 'dist ready' : 'missing dist/http.js; run npm ci --ignore-scripts && npm run build');
   record(fs.existsSync(path.join(projectRoot, 'package.json')) ? 'ok' : 'fail', 'Package root', projectRoot);
-  record(profile.profilePath ? 'ok' : 'warn', 'Saved profile', profile.profilePath ? profileSummary(profile) || profile.profilePath : 'none for this workspace');
+  record(profile.profilePath ? 'ok' : 'warn', 'Saved profile', profile.profilePath ? profileSummary(profile) || profile.profilePath : 'not loaded by default; pass --profile to use one');
   record(clipboard ? 'ok' : 'warn', 'Clipboard', clipboard || 'not found; URL will be printed for manual copy');
   record(browser ? 'ok' : 'warn', 'Browser open', browser || 'not found; open ChatGPT manually');
 
@@ -1623,7 +1656,7 @@ async function runDoctor(argv) {
   if (tunnel === 'none') {
     record('ok', 'Tunnel', 'local-only mode');
   } else if (tunnel === 'cloudflare') {
-    record(cloudflaredPath ? 'ok' : 'warn', 'cloudflared', cloudflaredPath || 'missing now; codexpro start can auto-install unless --no-install-cloudflared is used');
+    record(cloudflaredPath ? 'ok' : 'warn', 'cloudflared', cloudflaredPath || 'missing now; run codexpro install-cloudflared or pass --cloudflared');
   } else if (tunnel === 'cloudflare-named') {
     record(stableHostname ? 'ok' : 'fail', 'Hostname', stableHostname || 'required for Cloudflare stable mode');
     record(cloudflaredPath ? 'ok' : 'warn', 'cloudflared', cloudflaredPath || 'missing now; run codexpro install-cloudflared or pass --cloudflared');
@@ -1669,7 +1702,7 @@ async function ask(rl, question, fallback = '') {
   return answer.trim() || fallback;
 }
 
-function tunnelChoiceFromProfile(profile, fallback = 'cloudflare') {
+function tunnelChoiceFromProfile(profile, fallback = 'local') {
   if (profile?.tunnel === 'ngrok') return 'ngrok';
   if (profile?.tunnel === 'cloudflare-named') return 'stable';
   if (profile?.tunnel === 'none') return 'local';
@@ -1687,14 +1720,13 @@ function tunnelModeFromChoice(choice) {
 function hasExplicitTunnelInput(args) {
   return Boolean(
     args.tunnel ||
-    args.noProfile ||
     process.env.CODEXPRO_TUNNEL
   );
 }
 
 async function collectTunnelPreference(rl, defaults, profile, options = {}) {
-  const defaultTunnel = options.defaultTunnel ?? tunnelChoiceFromProfile(profile, 'cloudflare');
-  const tunnelAnswer = await ask(rl, 'Tunnel: cloudflare, ngrok, stable, or local?', defaultTunnel);
+  const defaultTunnel = options.defaultTunnel ?? tunnelChoiceFromProfile(profile, 'local');
+  const tunnelAnswer = await ask(rl, 'Tunnel: local, cloudflare, ngrok, or stable?', defaultTunnel);
   const tunnelChoice = normalizeSetupChoice(tunnelAnswer, ['cloudflare', 'quick', 'ngrok', 'stable', 'local'], defaultTunnel);
   const tunnel = tunnelModeFromChoice(tunnelChoice);
   let hostname = '';
@@ -1743,7 +1775,7 @@ function applyTunnelPreferenceToArgs(args, preference) {
 }
 
 function profileFromPreference(root, args, profile, preference) {
-  const mode = optionValue(args, profile, 'mode', ['CODEXPRO_MODE'], 'agent');
+  const mode = optionValue(args, profile, 'mode', ['CODEXPRO_MODE'], DEFAULT_MODE);
   const port = String(optionValue(args, profile, 'port', ['CODEXPRO_PORT'], '8787'));
   const bash = optionValue(args, profile, 'bash', ['CODEXPRO_BASH_MODE'], '');
   const write = optionValue(args, profile, 'write', ['CODEXPRO_WRITE_MODE'], '');
@@ -1771,48 +1803,20 @@ function profileFromPreference(root, args, profile, preference) {
 }
 
 async function maybeConfigureFirstRun(root, args, profile) {
-  if (profile.profilePath || !process.stdin.isTTY || !process.stdout.isTTY || process.env.CI || hasExplicitTunnelInput(args)) {
+  if (!args.saveConfig || profile.profilePath || !process.stdin.isTTY || !process.stdout.isTTY || process.env.CI || hasExplicitTunnelInput(args)) {
     return profile;
-  }
-
-  const reusableProfiles = listWorkspaceProfiles().filter((item) => item.root !== root);
-  if (reusableProfiles.length) {
-    const shown = reusableProfiles.slice(0, 9);
-    printBox('Saved setups', [
-      'No saved settings exist for this workspace, but CodexPro found saved setups from other workspaces.',
-      ...shown.map((item, index) => profileOneLine(item, index + 1)),
-      'Use a number to reuse one here, or type new to choose a fresh tunnel.'
-    ]);
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    try {
-      const answer = await ask(rl, 'Use saved setup number, or new?', shown.length === 1 ? '1' : 'new');
-      const normalized = answer.trim().toLowerCase();
-      const selectedIndex = Number(normalized);
-      if (Number.isInteger(selectedIndex) && selectedIndex >= 1 && selectedIndex <= shown.length) {
-        const selected = shown[selectedIndex - 1];
-        const payload = reusableProfilePayload(selected, {
-          port: String(optionValue(args, selected, 'port', ['CODEXPRO_PORT'], selected.port ?? '8787')),
-          mode: optionValue(args, selected, 'mode', ['CODEXPRO_MODE'], selected.mode ?? 'agent')
-        });
-        const savedPath = saveWorkspaceProfile(root, payload);
-        statusLine('ok', `Saved workspace settings from ${selected.root}: ${savedPath}`);
-        return loadWorkspaceProfile(root);
-      }
-    } finally {
-      rl.close();
-    }
   }
 
   printBox('First run setup', [
     'No saved tunnel preference exists for this workspace.',
-    'Choose once now. CodexPro will reuse this choice on future codexpro start runs until you change or delete it with codexpro settings.'
+    'Choose once now. This only runs because --save-config was supplied.'
   ]);
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const preference = await collectTunnelPreference(rl, args, profile, { defaultTunnel: 'cloudflare' });
+    const preference = await collectTunnelPreference(rl, args, profile, { defaultTunnel: 'local' });
     applyTunnelPreferenceToArgs(args, preference);
-    const saveAnswer = await ask(rl, 'Save this as the default for this workspace?', 'yes');
+    const saveAnswer = await ask(rl, 'Save this as the default for this workspace?', 'no');
     if (!['n', 'no'].includes(saveAnswer.trim().toLowerCase())) {
       const savedPath = saveWorkspaceProfile(root, profileFromPreference(root, args, profile, preference));
       statusLine('ok', `Saved workspace settings: ${savedPath}`);
@@ -1840,20 +1844,23 @@ async function runSetupWizard(argv) {
 
   printBox('CodexPro setup', [
     'This wizard prepares a ChatGPT connector for the folder you choose.',
-    'Press Enter to accept defaults. Stable tunnel choices are saved per workspace under ~/.codexpro.'
+    'Press Enter to accept safe local/handoff/bash-off defaults. Saved profiles are opt-in; pass --profile to reuse one as setup defaults.'
   ]);
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const rootInput = await ask(rl, 'Where is your project located?', defaultRoot);
     const root = realDir(rootInput);
-    const profile = defaults.noProfile ? {} : loadWorkspaceProfile(root);
+    const shouldLoadSetupProfile = defaults.useProfile === true && !defaults.noProfile;
+    const profile = shouldLoadSetupProfile ? loadWorkspaceProfile(root) : {};
     if (profile.profilePath) {
       statusLine('ok', `Loaded saved profile: ${profile.profilePath}`);
       printSavedProfileHint(profile);
+    } else if (defaults.useProfile && !defaults.noProfile) {
+      statusLine('warn', 'No saved profile found for this workspace; using safe setup defaults.');
     }
 
-    const savedTunnel = optionValue(defaults, profile, 'tunnel', ['CODEXPRO_TUNNEL'], 'cloudflare');
+    const savedTunnel = optionValue(defaults, profile, 'tunnel', ['CODEXPRO_TUNNEL'], DEFAULT_TUNNEL);
     const defaultTunnel = savedTunnel === 'cloudflare-named'
       ? 'stable'
       : savedTunnel === 'ngrok'
@@ -1862,7 +1869,7 @@ async function runSetupWizard(argv) {
           ? 'local'
           : 'quick';
     const defaultPort = String(optionValue(defaults, profile, 'port', ['CODEXPRO_PORT'], '8787'));
-    const defaultMode = normalizeSetupChoice(optionValue(defaults, profile, 'mode', ['CODEXPRO_MODE'], 'agent'), ['agent', 'handoff', 'pro'], 'agent');
+    const defaultMode = normalizeSetupChoice(optionValue(defaults, profile, 'mode', ['CODEXPRO_MODE'], DEFAULT_MODE), ['agent', 'handoff', 'pro'], DEFAULT_MODE);
 
     const port = await ask(rl, 'Which local port should CodexPro use?', defaultPort);
     if (!/^\d+$/.test(port)) throw new Error('Port must be a number.');
@@ -1870,8 +1877,8 @@ async function runSetupWizard(argv) {
     const mode = normalizeSetupChoice(modeAnswer, ['agent', 'handoff', 'pro'], defaultMode);
 
     printBox('Public URL', [
-      'ChatGPT needs an HTTPS URL it can reach.',
-      'quick  = CodexPro creates a Cloudflare quick tunnel for demos and local work.',
+      'Local-only is the safest default. Public URLs are explicit risk modes.',
+      'quick  = CodexPro runs a Cloudflare quick tunnel for demos and local work.',
       'stable = use your own domain with a Cloudflare named tunnel so the ChatGPT app URL does not change.',
       'ngrok  = use your ngrok free dev domain, for example https://name.ngrok-free.dev.',
       'local  = no tunnel, only useful for local MCP clients that can reach 127.0.0.1.'
@@ -1880,19 +1887,19 @@ async function runSetupWizard(argv) {
     const tunnelAnswer = await ask(rl, 'Public access: quick, stable, ngrok, or local?', defaultTunnel);
     const tunnelChoice = normalizeSetupChoice(tunnelAnswer, ['quick', 'stable', 'ngrok', 'local'], defaultTunnel);
     const args = ['start', '--root', root, '--port', port, '--mode', mode];
-    const bash = optionValue(defaults, profile, 'bash', ['CODEXPRO_BASH_MODE'], '');
-    const write = optionValue(defaults, profile, 'write', ['CODEXPRO_WRITE_MODE'], '');
+    const bash = optionValue(defaults, profile, 'bash', ['CODEXPRO_BASH_MODE'], DEFAULT_BASH);
+    const write = optionValue(defaults, profile, 'write', ['CODEXPRO_WRITE_MODE'], DEFAULT_WRITE);
     const toolMode = optionValue(defaults, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], '');
     const widgetDomain = optionValue(defaults, profile, 'widgetDomain', ['CODEXPRO_WIDGET_DOMAIN'], '');
     if (bash) args.push('--bash', bash);
     if (write) args.push('--write', write);
     if (toolMode) args.push('--tool-mode', toolMode);
     if (widgetDomain) args.push('--widget-domain', widgetDomain);
-    if (defaults.noInstallCloudflared) args.push('--no-install-cloudflared');
+    if (defaults.installCloudflared) args.push('--install-cloudflared');
     if (defaults.openChatgpt) args.push('--open-chatgpt');
     if (defaults.noCopyUrl) args.push('--no-copy-url');
 
-    let profileTunnel = 'cloudflare';
+    let profileTunnel = DEFAULT_TUNNEL;
     let profileHostname = '';
     let profileTunnelName = '';
     let profileNgrokConfig = '';
@@ -1944,7 +1951,7 @@ async function runSetupWizard(argv) {
       if (profileToken) args.push('--token', profileToken);
     }
 
-    const saveDefault = defaults.noSaveConfig ? 'no' : 'yes';
+    const saveDefault = defaults.saveConfig ? 'yes' : 'no';
     const saveAnswer = await ask(rl, 'Save this setup for future runs from this workspace?', saveDefault);
     const shouldSave = !['n', 'no'].includes(saveAnswer.trim().toLowerCase());
     if (shouldSave) {
@@ -1996,7 +2003,7 @@ function printProfile(root, profile) {
   printBox('CodexPro settings', [
     labelValue('Workspace', root),
     labelValue('Profile', profile.profilePath),
-    labelValue('Tunnel', safe.tunnel ?? 'cloudflare'),
+    labelValue('Tunnel', safe.tunnel ?? DEFAULT_TUNNEL),
     ...(safe.hostname ? [labelValue('Hostname', safe.hostname)] : []),
     ...(safe.port ? [labelValue('Port', safe.port)] : []),
     ...(safe.mode ? [labelValue('Mode', safe.mode)] : []),
@@ -2016,7 +2023,7 @@ function printProfileList(profiles = listWorkspaceProfiles()) {
 }
 
 function saveSettingsFromArgs(root, args, profile) {
-  const tunnel = optionValue(args, profile, 'tunnel', ['CODEXPRO_TUNNEL'], profile.tunnel ?? 'cloudflare');
+  const tunnel = optionValue(args, profile, 'tunnel', ['CODEXPRO_TUNNEL'], profile.tunnel ?? DEFAULT_TUNNEL);
   if (!['none', 'cloudflare', 'cloudflare-named', 'ngrok'].includes(tunnel)) {
     throw new Error('--tunnel must be none, cloudflare, cloudflare-named, or ngrok');
   }
@@ -2024,7 +2031,7 @@ function saveSettingsFromArgs(root, args, profile) {
   if ((tunnel === 'ngrok' || tunnel === 'cloudflare-named') && !hostname) {
     throw new Error('--hostname is required for ngrok and cloudflare-named settings.');
   }
-  const mode = optionValue(args, profile, 'mode', ['CODEXPRO_MODE'], profile.mode ?? 'agent');
+  const mode = optionValue(args, profile, 'mode', ['CODEXPRO_MODE'], profile.mode ?? DEFAULT_MODE);
   const toolMode = optionValue(args, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], profile.toolMode ?? '');
   const widgetDomain = optionValue(args, profile, 'widgetDomain', ['CODEXPRO_WIDGET_DOMAIN'], profile.widgetDomain ?? '');
   const port = String(optionValue(args, profile, 'port', ['CODEXPRO_PORT'], profile.port ?? '8787'));
@@ -2219,7 +2226,8 @@ function runControlPanel(details) {
       const normalized = key.toLowerCase();
       if (key === '\r' || key === '\n') {
         const opened = openUrl(details.chatgptSettingsUrl);
-        console.log(opened ? '\nOpened ChatGPT connector settings. The Server URL is already copied; paste it into Server URL.' : '\nCould not open ChatGPT automatically.');
+        const authNote = details.token && !details.allowQueryToken ? ' Configure Authorization: Bearer token if your client supports headers.' : '';
+        console.log(opened ? `\nOpened ChatGPT connector settings. Paste the Server URL into Server URL.${authNote}` : '\nCould not open ChatGPT automatically.');
         writeControlPrompt();
       } else if (normalized === 'c') {
         const copied = copyToClipboard(details.serverUrl);
@@ -2323,16 +2331,16 @@ async function main() {
   }
 
   const root = realDir(args.root ?? process.env.CODEXPRO_ROOT ?? process.cwd());
-  let profile = args.noProfile ? {} : loadWorkspaceProfile(root);
+  let profile = args.useProfile && !args.noProfile ? loadWorkspaceProfile(root) : {};
   profile = await maybeConfigureFirstRun(root, args, profile);
   const effectiveArgs = { ...profile, ...args };
-  if (profile.profilePath && !args.noProfile) {
+  if (profile.profilePath && args.useProfile && !args.noProfile) {
     statusLine('ok', `Using saved profile: ${profile.profilePath}`);
     const summary = profileSummary(profile);
-    if (summary) statusLine('ok', `${summary}. Future launches from this folder only need: codexpro start`);
+    if (summary) statusLine('ok', `${summary}. Future launches can opt in with: codexpro start --profile`);
   }
 
-  const tunnel = optionValue(args, profile, 'tunnel', ['CODEXPRO_TUNNEL'], 'cloudflare');
+  const tunnel = optionValue(args, profile, 'tunnel', ['CODEXPRO_TUNNEL'], DEFAULT_TUNNEL);
   if (!['none', 'cloudflare', 'cloudflare-named', 'ngrok'].includes(tunnel)) {
     throw new Error('--tunnel must be none, cloudflare, cloudflare-named, or ngrok');
   }
@@ -2353,7 +2361,7 @@ async function main() {
   if (args.noAuth && tunnel !== 'none') {
     throw new Error('--no-auth is only allowed with --tunnel none. Public tunnels require CODEXPRO_HTTP_TOKEN.');
   }
-  const mode = optionValue(args, profile, 'mode', ['CODEXPRO_MODE'], 'agent');
+  const mode = optionValue(args, profile, 'mode', ['CODEXPRO_MODE'], DEFAULT_MODE);
   if (!['agent', 'handoff', 'pro'].includes(mode)) {
     throw new Error('--mode must be agent, handoff, or pro');
   }
@@ -2361,16 +2369,17 @@ async function main() {
   const allowRoots = [root, ...(args.allowRoots ?? [])].map(realDir);
   const host = optionValue(args, profile, 'host', ['CODEXPRO_HOST'], '127.0.0.1');
   const port = String(optionValue(args, profile, 'port', ['CODEXPRO_PORT'], '8787'));
-  const bash = optionValue(args, profile, 'bash', ['CODEXPRO_BASH_MODE'], 'safe');
-  const write = optionValue(args, profile, 'write', ['CODEXPRO_WRITE_MODE'], mode === 'agent' ? 'workspace' : 'handoff');
-  const toolMode = optionValue(args, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], 'standard');
-  const widgetDomain = optionValue(args, profile, 'widgetDomain', ['CODEXPRO_WIDGET_DOMAIN'], 'https://rebel0789.github.io');
+  const bash = optionValue(args, profile, 'bash', ['CODEXPRO_BASH_MODE'], DEFAULT_BASH);
+  const write = optionValue(args, profile, 'write', ['CODEXPRO_WRITE_MODE'], DEFAULT_WRITE);
+  const toolMode = optionValue(args, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], DEFAULT_TOOL_MODE);
+  const widgetDomain = optionValue(args, profile, 'widgetDomain', ['CODEXPRO_WIDGET_DOMAIN'], DEFAULT_WIDGET_DOMAIN);
   if (!['off', 'safe', 'full'].includes(bash)) throw new Error('--bash must be off, safe, or full');
   if (!['off', 'handoff', 'workspace'].includes(write)) throw new Error('--write must be off, handoff, or workspace');
   if (!['minimal', 'standard', 'full'].includes(toolMode)) throw new Error('--tool-mode must be minimal, standard, or full');
 
   let token = args.noAuth ? '' : optionValue(args, profile, 'token', ['CODEXPRO_HTTP_TOKEN', 'CODEBASE_BRIDGE_HTTP_TOKEN'], '');
   if (!token && tunnel !== 'none') token = stableToken();
+  const allowQueryToken = Boolean(args.allowQueryToken || envFlag('CODEXPRO_ALLOW_QUERY_TOKEN'));
 
   const serverEnv = {
     ...process.env,
@@ -2383,8 +2392,11 @@ async function main() {
     CODEXPRO_TOOL_MODE: toolMode,
     CODEXPRO_WIDGET_DOMAIN: widgetDomain,
     CODEXPRO_MODE: mode,
-    CODEXPRO_TUNNEL_MODE: tunnel === 'none' ? '0' : '1'
+    CODEXPRO_TUNNEL_MODE: tunnel === 'none' ? '0' : '1',
+    CODEXPRO_ALLOW_QUERY_TOKEN: allowQueryToken ? '1' : '0',
+    CODEXPRO_ALLOW_SYMLINKS: args.allowSymlinks ? '1' : (process.env.CODEXPRO_ALLOW_SYMLINKS ?? '0')
   };
+  if (args.corsOrigins?.length) serverEnv.CODEXPRO_CORS_ORIGINS = args.corsOrigins.join(',');
   if (args.logRequests || process.env.CODEXPRO_LOG_REQUESTS === '1') serverEnv.CODEXPRO_LOG_REQUESTS = '1';
   if (args.allowHome) serverEnv.CODEXPRO_ALLOW_HOME = '1';
   if (token) serverEnv.CODEXPRO_HTTP_TOKEN = token;
@@ -2396,7 +2408,7 @@ async function main() {
 
   const httpPath = path.join(projectRoot, 'dist', 'http.js');
   if (!fs.existsSync(httpPath)) {
-    throw new Error(`Missing ${httpPath}. Run npm install && npm run build first.`);
+    throw new Error(`Missing ${httpPath}. Run npm ci --ignore-scripts && npm run build first.`);
   }
 
   await assertPortAvailable(host, port);
@@ -2442,7 +2454,8 @@ async function main() {
       toolMode,
       root,
       write,
-      bash
+      bash,
+      allowQueryToken
     });
     await runControlPanel(details);
     return;
@@ -2480,7 +2493,8 @@ async function main() {
       toolMode,
       root,
       write,
-      bash
+      bash,
+      allowQueryToken
     });
     await runControlPanel(details);
     return;
@@ -2489,7 +2503,7 @@ async function main() {
   const cloudflaredPath = await resolveCloudflared(effectiveArgs);
   if (!cloudflaredPath) {
     console.error('\ncloudflared was not found. The local MCP server is still running.');
-    console.error('Install Cloudflare Tunnel, rerun without --no-install-cloudflared, or run with --tunnel none for local clients.');
+    console.error('Install Cloudflare Tunnel, run codexpro install-cloudflared, pass --install-cloudflared, or run with --tunnel none for local clients.');
     console.error('Downloads: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/');
     const details = printConnectorBlock(`${localBase}/mcp`, token, {
       localBase,
@@ -2499,7 +2513,8 @@ async function main() {
       toolMode,
       root,
       write,
-      bash
+      bash,
+      allowQueryToken
     });
     await runControlPanel(details);
     return;
@@ -2517,7 +2532,8 @@ async function main() {
       toolMode,
       root,
       write,
-      bash
+      bash,
+      allowQueryToken
     });
     await runControlPanel(details);
     return;
@@ -2580,7 +2596,8 @@ async function main() {
     toolMode,
     root,
     write,
-    bash
+    bash,
+    allowQueryToken
   });
   await runControlPanel(details);
 }

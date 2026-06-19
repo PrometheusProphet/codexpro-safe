@@ -2,7 +2,6 @@
 import { randomUUID } from "node:crypto";
 import { timingSafeEqual } from "node:crypto";
 import express from "express";
-import cors from "cors";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig, type CodexProConfig } from "./config.js";
@@ -20,13 +19,16 @@ function onboardingPage(config: CodexProConfig): string {
   const localMcp = `http://${config.host}:${config.port}/mcp`;
   const allowedRoots = config.allowedRoots.map((root) => `<li>${escapeHtml(root)}</li>`).join("");
   const authLabel = config.authToken ? "Token protected" : "Disabled";
+  const authStep = config.authToken
+    ? "Use an Authorization: Bearer token header when your MCP client supports headers. Query-token URLs are disabled unless explicitly enabled."
+    : "Use <code>No Authentication / None</code> for this local-only session.";
   const writeTone = config.writeMode === "workspace" ? "agent" : config.writeMode;
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CodexPro Local Setup</title>
+  <title>codexpro-safe Local Setup</title>
   <style>
     :root {
       color-scheme: dark;
@@ -215,7 +217,7 @@ function onboardingPage(config: CodexProConfig): string {
           <li><span class="num">1</span><span>Open ChatGPT settings, Apps, then Create app.</span></li>
           <li><span class="num">2</span><span>Set Connection to <code>Server URL</code>.</span></li>
           <li><span class="num">3</span><span>Paste the copied CodexPro URL into the Server URL field.</span></li>
-          <li><span class="num">4</span><span>Use <code>No Authentication / None</code>. The private token is already inside the copied URL.</span></li>
+          <li><span class="num">4</span><span>${authStep}</span></li>
           <li><span class="num">5</span><span>Start with: <code>Use CodexPro as a coding agent. Call server_config, then open_current_workspace.</code></span></li>
         </ol>
       </article>
@@ -229,17 +231,59 @@ function onboardingPage(config: CodexProConfig): string {
           <div class="row"><span class="label">Bash mode</span><span class="pill ${config.bashMode === "safe" ? "" : "warn"}">${escapeHtml(config.bashMode)}</span></div>
           <div class="row"><span class="label">Widget domain</span><span class="mono">${escapeHtml(config.widgetDomain)}</span></div>
           <div class="row"><span class="label">Auth</span><span class="pill">${escapeHtml(authLabel)}</span></div>
+          <div class="row"><span class="label">Query token</span><span class="pill ${config.allowQueryToken ? "warn" : ""}">${config.allowQueryToken ? "enabled" : "disabled"}</span></div>
         </div>
       </article>
     </section>
     <section class="card" style="margin-top:18px">
       <h2>Allowed roots</h2>
       <ul class="roots">${allowedRoots}</ul>
-      <p class="footer">This page does not print the CodexPro token. Use the terminal control panel to copy the full Server URL again.</p>
+      <p class="footer">This page does not print the CodexPro token. Query-token URLs are opt-in for backward compatibility only.</p>
     </section>
   </main>
 </body>
 </html>`;
+}
+
+function isSafeLoopbackOrigin(origin: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) return false;
+  const host = parsed.hostname.toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+}
+
+function isAllowedCorsOrigin(origin: string, config: CodexProConfig): boolean {
+  if (config.corsOrigins.includes(origin)) return true;
+  return isSafeLoopbackOrigin(origin);
+}
+
+function corsOriginPolicy(config: CodexProConfig): express.RequestHandler {
+  return (req, res, next) => {
+    const origin = req.headers.origin;
+    if (!origin) {
+      next();
+      return;
+    }
+    if (!isAllowedCorsOrigin(origin, config)) {
+      res.status(403).send("CORS origin not allowed");
+      return;
+    }
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id");
+    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+    if (req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+    next();
+  };
 }
 
 async function main(): Promise<void> {
@@ -273,7 +317,7 @@ async function main(): Promise<void> {
     });
     next();
   });
-  app.use(cors({ exposedHeaders: ["Mcp-Session-Id"] }));
+  app.use(corsOriginPolicy(config));
   app.use((req, res, next) => {
     if (!config.authToken) {
       next();
@@ -287,7 +331,8 @@ async function main(): Promise<void> {
       : typeof req.query.token === "string"
         ? req.query.token
         : undefined;
-    if (!tokenMatches(bearer) && !tokenMatches(queryToken)) {
+    const acceptedQueryToken = config.allowQueryToken ? queryToken : undefined;
+    if (!tokenMatches(bearer) && !tokenMatches(acceptedQueryToken)) {
       res.status(401).send("Unauthorized");
       return;
     }
@@ -356,7 +401,10 @@ async function main(): Promise<void> {
       widgetDomain: config.widgetDomain,
       contextDir: config.contextDir,
       authEnabled: Boolean(config.authToken),
-      authRequired: config.requireHttpToken
+      authRequired: config.requireHttpToken,
+      allowQueryToken: config.allowQueryToken,
+      allowSymlinks: config.allowSymlinks,
+      corsOrigins: config.corsOrigins
     });
   });
 

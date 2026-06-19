@@ -113,9 +113,11 @@ function hasWidgetMeta(tools, name, uri) {
 await expectHttpTokenRequired('non-loopback', { CODEXPRO_HOST: '0.0.0.0' });
 await expectHttpTokenRequired('tunnel-mode', { CODEXPRO_TUNNEL_MODE: '1' });
 
-async function withClient(url, fn) {
+async function withClient(url, token, fn) {
   const client = new Client({ name: 'codexpro-http-smoke', version: '0.0.0' });
-  const transport = new StreamableHTTPClientTransport(new URL(url));
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
+    requestInit: token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
+  });
   try {
     await client.connect(transport);
     return await fn(client);
@@ -154,7 +156,7 @@ const child = spawn('node', ['dist/http.js'], {
     CODEXPRO_ALLOWED_ROOTS: root,
     CODEXPRO_PORT: String(port),
     CODEXPRO_HTTP_TOKEN: token,
-    CODEXPRO_BASH_MODE: 'safe',
+    CODEXPRO_BASH_MODE: 'off',
     CODEXPRO_WRITE_MODE: 'handoff',
     CODEXPRO_TOOL_MODE: 'full',
     CODEXPRO_WIDGET_DOMAIN: 'https://widgets.codexpro.test'
@@ -179,11 +181,27 @@ try {
   }
 
   const queryAuthorized = await fetch(`${baseUrl}/healthz?codexpro_token=${encodeURIComponent(token)}`);
-  if (queryAuthorized.status !== 200) {
-    throw new Error(`expected URL-token healthz to return 200, got ${queryAuthorized.status}`);
+  if (queryAuthorized.status !== 401) {
+    throw new Error(`expected URL-token healthz to be rejected by default, got ${queryAuthorized.status}`);
   }
 
-  const home = await fetch(`${baseUrl}/?codexpro_token=${encodeURIComponent(token)}`);
+  const corsRejected = await fetch(`${baseUrl}/healthz`, {
+    headers: { Origin: 'https://evil.example', Authorization: `Bearer ${token}` }
+  });
+  if (corsRejected.status !== 403) {
+    throw new Error(`expected unconfigured browser Origin to return 403, got ${corsRejected.status}`);
+  }
+
+  const loopbackCors = await fetch(`${baseUrl}/healthz`, {
+    headers: { Origin: 'http://localhost:5173', Authorization: `Bearer ${token}` }
+  });
+  if (loopbackCors.status !== 200 || loopbackCors.headers.get('access-control-allow-origin') !== 'http://localhost:5173') {
+    throw new Error(`expected loopback browser Origin to be allowed, got ${loopbackCors.status} ${loopbackCors.headers.get('access-control-allow-origin')}`);
+  }
+
+  const home = await fetch(`${baseUrl}/`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
   const homeText = await home.text();
   if (home.status !== 200 || !home.headers.get('content-type')?.includes('text/html')) {
     throw new Error(`expected authenticated onboarding page to return HTML 200, got ${home.status}`);
@@ -192,28 +210,22 @@ try {
     throw new Error('onboarding page did not include expected setup copy');
   }
 
-  const queryTools = await listTools(`${baseUrl}/mcp?codexpro_token=${encodeURIComponent(token)}`);
-  const queryToolNames = toolNames(queryTools);
+  const headerTools = await listTools(`${baseUrl}/mcp`, token);
+  const headerToolNames = toolNames(headerTools);
   for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'load_skill', 'show_changes', 'codex_context', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {
-    if (!queryToolNames.includes(expected)) {
-      throw new Error(`URL-token MCP tools/list missing ${expected}; got ${queryToolNames.join(', ')}`);
+    if (!headerToolNames.includes(expected)) {
+      throw new Error(`bearer MCP tools/list missing ${expected}; got ${headerToolNames.join(', ')}`);
     }
   }
   const toolCardUri = 'ui://widget/codexpro-tool-card-v9.html';
-  for (const visualTool of queryToolNames) {
-    if (!hasWidgetMeta(queryTools, visualTool, toolCardUri)) {
+  for (const visualTool of headerToolNames) {
+    if (!hasWidgetMeta(headerTools, visualTool, toolCardUri)) {
       throw new Error(`${visualTool} should render the CodexPro widget`);
     }
   }
 
-  const headerTools = await listTools(`${baseUrl}/mcp`, token);
-  const headerToolNames = toolNames(headerTools);
-  if (!headerToolNames.includes('server_config')) {
-    throw new Error(`bearer MCP tools/list missing server_config; got ${headerToolNames.join(', ')}`);
-  }
-
-  const mcpUrl = `${baseUrl}/mcp?codexpro_token=${encodeURIComponent(token)}`;
-  await withClient(mcpUrl, async (client) => {
+  const mcpUrl = `${baseUrl}/mcp`;
+  await withClient(mcpUrl, token, async (client) => {
     const resources = await client.listResources();
     const toolCard = resources.resources.find((resource) => resource.uri === toolCardUri);
     if (!toolCard) throw new Error(`HTTP MCP resources/list missing ${toolCardUri}`);
@@ -234,7 +246,7 @@ try {
     }
   });
 
-  const currentOpened = await withClient(mcpUrl, async (client) => {
+  const currentOpened = await withClient(mcpUrl, token, async (client) => {
     const result = await callTool(client, 'open_current_workspace', { include_tree: false });
     if (result.structuredContent.codexpro_tool !== 'open_current_workspace') {
       throw new Error('HTTP tool result was not tagged for widget rendering');
@@ -248,7 +260,7 @@ try {
     return result.structuredContent.workspace_id;
   });
 
-  await withClient(mcpUrl, async (client) => {
+  await withClient(mcpUrl, token, async (client) => {
     const inventory = await callTool(client, 'codexpro_inventory', {
       include_global_skills: false,
       include_mcp_servers: false
@@ -265,7 +277,7 @@ try {
     }
   });
 
-  const opened = await withClient(mcpUrl, async (client) => {
+  const opened = await withClient(mcpUrl, token, async (client) => {
     const result = await callTool(client, 'open_workspace', { include_tree: false });
     return result.structuredContent.workspace_id;
   });
@@ -273,7 +285,7 @@ try {
     throw new Error(`open_current_workspace returned ${currentOpened}, open_workspace default returned ${opened}`);
   }
 
-  await withClient(mcpUrl, async (client) => {
+  await withClient(mcpUrl, token, async (client) => {
     const list = await callTool(client, 'list_workspaces');
     const ids = list.structuredContent.workspaces.map((workspace) => workspace.id);
     if (!ids.includes(opened)) {
@@ -303,7 +315,7 @@ try {
     if (error?.code !== 'ENOENT') throw error;
   }
 
-  await withClient(mcpUrl, async (client) => {
+  await withClient(mcpUrl, token, async (client) => {
     const exported = await callTool(client, 'export_pro_context', {
       workspace_id: opened,
       max_files: 4,
@@ -316,6 +328,35 @@ try {
   await fs.stat(path.join(root, '.ai-bridge', 'pro-context.md'));
 } finally {
   child.kill('SIGTERM');
+}
+
+const queryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-http-query-opt-in-'));
+const queryPort = await getFreePort();
+const queryToken = 'codexpro-http-query-token';
+const queryChild = spawn('node', ['dist/http.js'], {
+  cwd: path.resolve('.'),
+  env: {
+    ...process.env,
+    CODEXPRO_ROOT: queryRoot,
+    CODEXPRO_ALLOWED_ROOTS: queryRoot,
+    CODEXPRO_PORT: String(queryPort),
+    CODEXPRO_HTTP_TOKEN: queryToken,
+    CODEXPRO_ALLOW_QUERY_TOKEN: '1',
+    CODEXPRO_BASH_MODE: 'off',
+    CODEXPRO_WRITE_MODE: 'handoff'
+  },
+  stdio: ['ignore', 'pipe', 'pipe']
+});
+
+try {
+  await waitForListening(queryChild);
+  const queryBaseUrl = `http://127.0.0.1:${queryPort}`;
+  const queryHealth = await fetch(`${queryBaseUrl}/healthz?codexpro_token=${encodeURIComponent(queryToken)}`);
+  if (queryHealth.status !== 200) {
+    throw new Error(`expected URL-token healthz to work after opt-in, got ${queryHealth.status}`);
+  }
+} finally {
+  queryChild.kill('SIGTERM');
 }
 
 console.log('✓ http smoke test passed');

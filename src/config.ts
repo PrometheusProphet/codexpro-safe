@@ -14,6 +14,9 @@ export interface CodexProConfig {
   widgetDomain: string;
   authToken?: string;
   requireHttpToken: boolean;
+  allowQueryToken: boolean;
+  allowSymlinks: boolean;
+  corsOrigins: string[];
   bashMode: BashMode;
   writeMode: WriteMode;
   toolMode: ToolMode;
@@ -39,6 +42,38 @@ const DEFAULT_BLOCKED_GLOBS = [
   ".env.*",
   "**/.env",
   "**/.env.*",
+  ".npmrc",
+  "**/.npmrc",
+  ".pypirc",
+  "**/.pypirc",
+  ".netrc",
+  "**/.netrc",
+  ".aws",
+  ".aws/**",
+  "**/.aws/**",
+  ".azure",
+  ".azure/**",
+  "**/.azure/**",
+  ".config/gcloud/**",
+  "**/.config/gcloud/**",
+  ".kube",
+  ".kube/**",
+  "**/.kube/**",
+  "terraform.tfstate",
+  "*.tfstate",
+  "*.tfstate.*",
+  "**/*.p12",
+  "**/*.pfx",
+  "**/*.crt",
+  "**/*.cer",
+  "**/*service-account*.json",
+  "**/*credentials*.json",
+  "**/*secret*.json",
+  "**/docker/config.json",
+  "**/.docker/config.json",
+  "**/*.sqlite",
+  "**/*.sqlite3",
+  "**/*.db",
   "**/*.pem",
   "**/*.key",
   "**/id_rsa",
@@ -86,7 +121,7 @@ function parseArgs(argv: string[]): Record<string, string | string[] | boolean> 
       }
     }
 
-    if (key === "allow-root") {
+    if (key === "allow-root" || key === "cors-origin") {
       const prev = out[key];
       if (Array.isArray(prev)) prev.push(String(value));
       else if (prev) out[key] = [String(prev), String(value)];
@@ -137,12 +172,12 @@ function numberFrom(value: string | undefined, fallback: number, min: number, ma
 
 function bashModeFrom(value: string | undefined): BashMode {
   if (value === "off" || value === "safe" || value === "full") return value;
-  return "safe";
+  return "off";
 }
 
 function writeModeFrom(value: string | undefined): WriteMode {
   if (value === "off" || value === "handoff" || value === "workspace") return value;
-  return "workspace";
+  return "handoff";
 }
 
 function toolModeFrom(value: string | undefined): ToolMode {
@@ -172,8 +207,40 @@ function boolFrom(value: string | undefined, fallback = false): boolean {
   return ["1", "true", "yes", "y", "on"].includes(value.toLowerCase());
 }
 
+function boolArgFrom(value: string | boolean | string[] | undefined, fallback = false): boolean {
+  if (value === undefined || Array.isArray(value)) return fallback;
+  if (typeof value === "boolean") return value;
+  return boolFrom(value, fallback);
+}
+
 function isLoopbackHost(host: string): boolean {
   return host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+
+function originFrom(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    throw new Error(`CORS origin must be a valid origin URL, got: ${value}`);
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(`CORS origin must use http or https, got: ${value}`);
+  }
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new Error(`CORS origin must be an origin only, for example https://app.example.com, got: ${value}`);
+  }
+  return parsed.origin;
+}
+
+function corsOriginsFrom(args: Record<string, string | string[] | boolean>): string[] {
+  const argOrigins = Array.isArray(args["cors-origin"])
+    ? args["cors-origin"]
+    : typeof args["cors-origin"] === "string"
+      ? [args["cors-origin"]]
+      : [];
+  const envOrigins = splitList(process.env.CODEXPRO_CORS_ORIGINS, ",");
+  return [...new Set([...argOrigins, ...envOrigins].map(originFrom))];
 }
 
 export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
@@ -206,6 +273,9 @@ export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
   const extraBlockedGlobs = splitList(process.env.CODEXPRO_BLOCKED_GLOBS, ",");
   const host = hostArg ?? process.env.HOST ?? process.env.CODEXPRO_HOST ?? "127.0.0.1";
   const authToken = process.env.CODEXPRO_HTTP_TOKEN ?? process.env.CODEBASE_BRIDGE_HTTP_TOKEN;
+  const allowQueryToken = boolArgFrom(args["allow-query-token"], boolFrom(process.env.CODEXPRO_ALLOW_QUERY_TOKEN, false));
+  const allowSymlinks = boolArgFrom(args["allow-symlinks"], boolFrom(process.env.CODEXPRO_ALLOW_SYMLINKS, false));
+  const corsOrigins = corsOriginsFrom(args);
   const allowNoToken = boolFrom(process.env.CODEXPRO_ALLOW_NO_HTTP_TOKEN, false);
   const requireHttpToken =
     boolFrom(process.env.CODEXPRO_REQUIRE_HTTP_TOKEN, false) ||
@@ -220,6 +290,9 @@ export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
     widgetDomain: widgetDomainFrom(widgetDomainArg ?? process.env.CODEXPRO_WIDGET_DOMAIN),
     authToken,
     requireHttpToken,
+    allowQueryToken,
+    allowSymlinks,
+    corsOrigins,
     bashMode: bashModeFrom(bashArg ?? process.env.CODEXPRO_BASH_MODE),
     writeMode: writeModeFrom(writeArg ?? process.env.CODEXPRO_WRITE_MODE),
     toolMode: toolModeFrom(toolModeArg ?? process.env.CODEXPRO_TOOL_MODE),
