@@ -1,5 +1,5 @@
 {
-  "name": "codexpro",
+  "name": "codexpro-safe",
   "version": "0.28.5",
   "description": "A local MCP/App SDK-style connector that lets ChatGPT inspect, edit, and hand off work to Codex inside a local dev workspace.",
   "type": "module",
@@ -18,6 +18,7 @@
     "codex",
     "apps-sdk",
     "codexpro",
+    "codexpro-safe",
     "local-development",
     "cloudflare-tunnel",
     "ngrok"
@@ -48,9 +49,8 @@
     "access": "public"
   },
   "bin": {
-    "codexpro": "scripts/codexpro.mjs",
-    "codexpro-mcp": "dist/stdio.js",
-    "codexpro-mcp-http": "dist/http.js"
+    "codexpro-safe": "scripts/codexpro.mjs",
+    "codexpro": "scripts/codexpro.mjs"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -60,15 +60,15 @@
     "start:http": "node dist/http.js",
     "dev:stdio": "tsx src/stdio.ts",
     "dev:http": "tsx src/http.ts",
-    "smoke": "node scripts/smoke.mjs && node scripts/http-smoke.mjs && node scripts/pro-smoke.mjs && node scripts/doctor-smoke.mjs && node scripts/settings-smoke.mjs && node scripts/execute-handoff-smoke.mjs",
+    "smoke": "node scripts/safe-defaults-smoke.mjs && node scripts/smoke.mjs && node scripts/http-smoke.mjs && node scripts/pro-smoke.mjs && node scripts/doctor-smoke.mjs && node scripts/settings-smoke.mjs && node scripts/execute-handoff-smoke.mjs",
     "doctor": "node scripts/codexpro.mjs doctor",
-    "connect": "node scripts/codexpro.mjs",
+    "connect": "node scripts/codexpro.mjs --tunnel none --mode handoff --bash off --write handoff",
     "connect:setup": "node scripts/codexpro.mjs setup",
-    "connect:local": "node scripts/codexpro.mjs --tunnel none",
-    "connect:cloudflare": "node scripts/codexpro.mjs --tunnel cloudflare",
-    "connect:chatgpt": "node scripts/codexpro.mjs --tunnel cloudflare",
-    "connect:stable": "node scripts/codexpro.mjs --tunnel cloudflare-named",
-    "connect:ngrok": "node scripts/codexpro.mjs ngrok",
+    "connect:local": "node scripts/codexpro.mjs --tunnel none --mode handoff --bash off --write handoff",
+    "connect:cloudflare": "node scripts/codexpro.mjs --tunnel cloudflare --mode handoff --bash off --write handoff",
+    "connect:chatgpt": "node scripts/codexpro.mjs --tunnel none --mode handoff --bash off --write handoff",
+    "connect:stable": "node scripts/codexpro.mjs --tunnel cloudflare-named --mode handoff --bash off --write handoff",
+    "connect:ngrok": "node scripts/codexpro.mjs ngrok --mode handoff --bash off --write handoff",
     "pro:bundle": "node scripts/pro-bundle.mjs",
     "pro:apply": "node scripts/pro-apply.mjs"
   },

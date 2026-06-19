@@ -115,11 +115,14 @@ Add this once in ChatGPT Developer Mode:
 ```text
 Name: CodexPro
 Connection: Server URL
-Server URL: https://local.example.space/mcp?codexpro_token=replace-with-a-long-stable-token
-Authentication: None / No Authentication
+Server URL: https://local.example.space/mcp
+Authentication: Bearer token
+Token: paste your long workspace token
 ```
 
 After that, restart only the terminal command. You do not need to edit the ChatGPT connector unless you change the hostname or token.
+
+Temporary compatibility only: if your client cannot send a Bearer token, launch once with `--allow-query-token` or `CODEXPRO_ALLOW_QUERY_TOKEN=1` and use a URL containing `?codexpro_token=...`. Do not save or share that URL; query-token URLs are weaker because tokens can appear in URLs, logs, browser history, screenshots, and copied text.
 
 ## Dashboard-Managed Tunnel Token
 
@@ -182,11 +185,14 @@ Add this once in ChatGPT Developer Mode:
 ```text
 Name: CodexPro
 Connection: Server URL
-Server URL: https://your-domain.ngrok-free.dev/mcp?codexpro_token=replace-with-a-long-stable-token
-Authentication: None / No Authentication
+Server URL: https://your-domain.ngrok-free.dev/mcp
+Authentication: Bearer token
+Token: paste your long workspace token
 ```
 
 CodexPro starts the local MCP server, runs `ngrok http http://127.0.0.1:8787 --url https://your-domain.ngrok-free.dev`, waits for `/healthz`, copies the Server URL, and keeps both processes alive until you quit.
+
+Temporary compatibility only: if your client cannot send a Bearer token, launch once with `--allow-query-token` or `CODEXPRO_ALLOW_QUERY_TOKEN=1` and use a URL containing `?codexpro_token=...`. Do not save or share that URL; query-token URLs are weaker because tokens can appear in URLs, logs, browser history, screenshots, and copied text.
 
 ## Product Plan For All Users
 

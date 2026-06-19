@@ -3,6 +3,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+function commandExists(command) {
+  const result = spawnSync(process.platform === 'win32' ? 'where' : 'command', process.platform === 'win32' ? [command] : ['-v', command], {
+    shell: process.platform !== 'win32',
+    stdio: 'ignore'
+  });
+  return result.status === 0;
+}
+
 function encode(message) {
   return `${JSON.stringify(message)}\n`;
 }
@@ -62,6 +70,10 @@ class McpStdioClient {
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-smoke-'));
 await fs.writeFile(path.join(tmp, 'demo.txt'), 'alpha\nread\nread\nomega\n', 'utf8');
 await fs.writeFile(path.join(tmp, 'config.txt'), 'OPENAI_API_KEY=sk-realSecretValue123\n', 'utf8');
+await fs.writeFile(path.join(tmp, '.npmrc'), '//registry.npmjs.org/:_authToken=secret\n', 'utf8');
+await fs.mkdir(path.join(tmp, '.aws'), { recursive: true });
+await fs.writeFile(path.join(tmp, '.aws', 'credentials'), '[default]\naws_secret_access_key=secret\n', 'utf8');
+await fs.writeFile(path.join(tmp, 'state.sqlite'), 'not really sqlite\n', 'utf8');
 await fs.writeFile(path.join(tmp, 'AGENTS.md'), '# Smoke Agents\n\n- Preserve demo.txt.\n', 'utf8');
 await fs.mkdir(path.join(tmp, '.codex', 'skills', 'smoke-skill'), { recursive: true });
 await fs.writeFile(path.join(tmp, '.codex', 'skills', 'smoke-skill', 'SKILL.md'), [
@@ -90,13 +102,20 @@ await fs.writeFile(path.join(tmp, 'package.json'), JSON.stringify({
 }, null, 2), 'utf8');
 const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-outside-'));
 await fs.writeFile(path.join(outside, 'secret.txt'), 'do-not-read', 'utf8');
+const bashAvailable = process.platform === 'win32' ? commandExists('bash') : true;
 let symlinkEscapePath = 'secret-link.txt';
+let symlinkInsidePath = 'demo-link.txt';
 try {
   await fs.symlink(path.join(outside, 'secret.txt'), path.join(tmp, symlinkEscapePath));
+  await fs.symlink(path.join(tmp, 'demo.txt'), path.join(tmp, symlinkInsidePath));
 } catch (error) {
   if (process.platform !== 'win32' || error?.code !== 'EPERM') throw error;
   symlinkEscapePath = 'secret-link-dir/secret.txt';
   await fs.symlink(outside, path.join(tmp, 'secret-link-dir'), 'junction');
+  await fs.mkdir(path.join(tmp, 'inside-real-dir'), { recursive: true });
+  await fs.writeFile(path.join(tmp, 'inside-real-dir', 'file.txt'), 'inside\n', 'utf8');
+  symlinkInsidePath = 'inside-link-dir/file.txt';
+  await fs.symlink(path.join(tmp, 'inside-real-dir'), path.join(tmp, 'inside-link-dir'), 'junction');
 }
 for (const args of [['init'], ['add', 'demo.txt', 'AGENTS.md', 'package.json']]) {
   const result = spawnSync('git', args, { cwd: tmp, encoding: 'utf8' });
@@ -109,7 +128,7 @@ if (commitResult.status !== 0) {
   throw new Error(`git commit failed: ${commitResult.stderr || commitResult.stdout}`);
 }
 
-const client = new McpStdioClient('node', ['dist/stdio.js', '--root', tmp, '--allow-root', tmp, '--bash', 'safe', '--tool-mode', 'full'], {
+const client = new McpStdioClient('node', ['dist/stdio.js', '--root', tmp, '--allow-root', tmp, '--bash', bashAvailable ? 'safe' : 'off', '--write', 'workspace', '--tool-mode', 'full'], {
   cwd: path.resolve('.'),
   env: { ...process.env, CODEXPRO_ROOT: tmp, CODEXPRO_ALLOWED_ROOTS: tmp, CODEXPRO_WIDGET_DOMAIN: 'https://widgets.codexpro.test' }
 });
@@ -236,6 +255,10 @@ if (envRefPayload.includes('[REDACTED_SECRET]')) {
 }
 const symlinkRead = await client.request('tools/call', { name: 'read', arguments: { workspace_id: ws, path: symlinkEscapePath } });
 if (!symlinkRead.isError) throw new Error('symlink escape read was not blocked');
+await expectToolError('read', { workspace_id: ws, path: symlinkInsidePath }, /symlink|junction/i);
+await expectToolError('read', { workspace_id: ws, path: '.npmrc' }, /blocked/i);
+await expectToolError('read', { workspace_id: ws, path: '.aws/credentials' }, /blocked/i);
+await expectToolError('read', { workspace_id: ws, path: 'state.sqlite' }, /blocked/i);
 await client.request('tools/call', { name: 'edit', arguments: { workspace_id: ws, path: 'demo.txt', old_text: 'read\nread', new_text: 'read\nwrite' } });
 const changes = await client.request('tools/call', { name: 'show_changes', arguments: { workspace_id: ws } });
 if (!changes.structuredContent.changed || !changes.structuredContent.diff.includes('demo.txt')) {
@@ -263,14 +286,18 @@ const codexContext = await client.request('tools/call', { name: 'codex_context',
 if (!codexContext.structuredContent.agents_files.includes('AGENTS.md')) throw new Error('codex_context did not include AGENTS.md');
 if (codexContext.structuredContent.agents_files.length !== 1) throw new Error(`codex_context returned duplicate AGENTS files: ${codexContext.structuredContent.agents_files.join(', ')}`);
 if (!codexContext.content?.[0]?.text?.includes('Smoke Agents')) throw new Error('codex_context did not include AGENTS.md content');
-await client.request('tools/call', { name: 'bash', arguments: { workspace_id: ws, command: 'pwd' } });
-await expectToolError('bash', { workspace_id: ws, command: 'find /tmp' }, /blocked/i);
-await expectToolError('bash', { workspace_id: ws, command: 'find . -fprint leaked.txt' }, /blocked/i);
-await expectToolError('bash', { workspace_id: ws, command: 'git show HEAD:.env' }, /blocked/i);
-await expectToolError('bash', { workspace_id: ws, command: 'ls $HOME' }, /blocked/i);
-const clientBuild = await client.request('tools/call', { name: 'bash', arguments: { workspace_id: ws, command: 'npm run build:clients', timeout_ms: 60000 } });
-if (!clientBuild.content?.[0]?.text?.includes('clients ok')) {
-  throw new Error('safe bash did not run npm run build:clients');
+if (bashAvailable) {
+  await client.request('tools/call', { name: 'bash', arguments: { workspace_id: ws, command: 'pwd' } });
+  await expectToolError('bash', { workspace_id: ws, command: 'find /tmp' }, /blocked/i);
+  await expectToolError('bash', { workspace_id: ws, command: 'find . -fprint leaked.txt' }, /blocked/i);
+  await expectToolError('bash', { workspace_id: ws, command: 'git show HEAD:.env' }, /blocked/i);
+  await expectToolError('bash', { workspace_id: ws, command: 'ls $HOME' }, /blocked/i);
+  const clientBuild = await client.request('tools/call', { name: 'bash', arguments: { workspace_id: ws, command: 'npm run build:clients', timeout_ms: 60000 } });
+  if (!clientBuild.content?.[0]?.text?.includes('clients ok')) {
+    throw new Error('safe bash did not run npm run build:clients');
+  }
+} else {
+  await expectToolError('bash', { workspace_id: ws, command: 'pwd' }, /disabled/i);
 }
 const exported = await client.request('tools/call', { name: 'export_pro_context', arguments: { workspace_id: ws, selected_paths: ['demo.txt'], max_files: 4, max_total_bytes: 80000 } });
 if (exported.structuredContent.path !== '.ai-bridge/pro-context.md') throw new Error('export_pro_context wrote an unexpected path');
