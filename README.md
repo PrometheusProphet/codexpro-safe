@@ -134,6 +134,7 @@ Standard mode exposes:
 - `bash` — run allowlisted shell commands in the workspace. Controlled by `CODEXPRO_BASH_MODE`.
 - `show_changes` — one review-oriented summary with git status, diff stats, and optional diff.
 - `read_handoff` — read `.ai-bridge` files.
+- `save_prompt_file` — save generated Codex prompts as Markdown/text in fixed prompt-only directories; works in handoff mode without enabling source writes.
 - `export_pro_context` — write `.ai-bridge/pro-context.md` for models that cannot call MCP tools directly.
 - `handoff_to_agent` — write `.ai-bridge/current-plan.md` for Codex, OpenCode, Pi, or a custom local implementation agent without executing local commands.
 
@@ -216,7 +217,7 @@ write/edit diffs
 bash verification commands
 git_status, git_diff, show_changes review summaries
 read_handoff, codex_context
-handoff/pro-context exports
+prompt saves and handoff/pro-context exports
 ```
 
 Cards stay compact by default. Git details, discovered skills, file trees, terminal output, context bundles, and raw diffs are folded or bounded so the chat does not fill with project inventory unless you open it.
@@ -1007,6 +1008,8 @@ workspace  write/edit can write workspace files, except blocked paths
 ```
 
 The launcher uses `handoff` unless you explicitly pass `--write workspace`.
+
+`save_prompt_file` is the narrow exception for prompt handoff and coordination. In standard and full tool modes it can save generated prompts only as `.md` or `.txt` files under fixed prompt-only targets: `.ai-bridge/prompts/`, `docs/chatgpt/generated-prompts/`, or `docs/loop/inbox/`. It does not accept arbitrary directories, does not execute commands, and does not allow generic source editing. Use `workspace` write mode only for trusted direct source edits.
 
 ## Tool modes
 

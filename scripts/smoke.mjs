@@ -141,7 +141,7 @@ await client.request('initialize', {
 client.notify('notifications/initialized');
 const tools = await client.request('tools/list', {});
 const toolNames = tools.tools.map((tool) => tool.name);
-for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'list_workspaces', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'tree', 'search', 'load_skill', 'read', 'write', 'edit', 'bash', 'git_status', 'git_diff', 'show_changes', 'read_handoff', 'codex_context', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {
+for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'list_workspaces', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'tree', 'search', 'load_skill', 'read', 'write', 'edit', 'bash', 'git_status', 'git_diff', 'show_changes', 'read_handoff', 'codex_context', 'save_prompt_file', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {
   if (!toolNames.includes(expected)) throw new Error(`missing tool: ${expected}`);
 }
 const toolCardUri = 'ui://widget/codexpro-tool-card-v9.html';
@@ -150,8 +150,8 @@ function hasWidgetMeta(name) {
   const meta = toolsByName.get(name)?._meta ?? {};
   return meta.ui?.resourceUri === toolCardUri || meta['openai/outputTemplate'] === toolCardUri;
 }
-async function expectToolError(name, args, pattern) {
-  const result = await client.request('tools/call', { name, arguments: args });
+async function expectToolError(name, args, pattern, toolClient = client) {
+  const result = await toolClient.request('tools/call', { name, arguments: args });
   if (!result.isError) {
     throw new Error(`${name} unexpectedly succeeded`);
   }
@@ -399,8 +399,140 @@ async function assertToolMode(mode, expected, hidden) {
   modeClient.close();
 }
 
-await assertToolMode('', ['server_config', 'codexpro_self_test', 'open_current_workspace', 'open_workspace', 'tree', 'search', 'load_skill', 'read', 'write', 'edit', 'bash', 'show_changes', 'read_handoff', 'export_pro_context', 'handoff_to_agent'], ['codexpro_inventory', 'workspace_snapshot', 'git_status', 'git_diff', 'codex_context', 'handoff_to_codex']);
-await assertToolMode('minimal', ['server_config', 'codexpro_self_test', 'open_current_workspace', 'open_workspace', 'read', 'write', 'edit', 'bash', 'show_changes'], ['tree', 'search', 'load_skill', 'read_handoff', 'export_pro_context', 'handoff_to_agent', 'codex_context']);
+await assertToolMode('', ['server_config', 'codexpro_self_test', 'open_current_workspace', 'open_workspace', 'tree', 'search', 'load_skill', 'read', 'write', 'edit', 'bash', 'show_changes', 'read_handoff', 'save_prompt_file', 'export_pro_context', 'handoff_to_agent'], ['codexpro_inventory', 'workspace_snapshot', 'git_status', 'git_diff', 'codex_context', 'handoff_to_codex']);
+await assertToolMode('minimal', ['server_config', 'codexpro_self_test', 'open_current_workspace', 'open_workspace', 'read', 'write', 'edit', 'bash', 'show_changes'], ['tree', 'search', 'load_skill', 'read_handoff', 'save_prompt_file', 'export_pro_context', 'handoff_to_agent', 'codex_context']);
+
+function fileForRel(root, relPath) {
+  return path.join(root, ...relPath.split('/'));
+}
+
+function assertSavedUnder(result, prefix) {
+  const relPath = result.structuredContent.path;
+  if (!relPath?.startsWith?.(prefix)) {
+    throw new Error(`prompt path ${relPath} did not start with ${prefix}`);
+  }
+  return relPath;
+}
+
+const promptRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-prompt-smoke-'));
+await fs.writeFile(path.join(promptRoot, 'README.md'), '# Prompt smoke fixture\n', 'utf8');
+const handoffPromptClient = new McpStdioClient('node', ['dist/stdio.js', '--root', promptRoot, '--allow-root', promptRoot, '--write', 'handoff', '--tool-mode', 'standard'], {
+  cwd: path.resolve('.'),
+  env: { ...process.env, CODEXPRO_ROOT: promptRoot, CODEXPRO_ALLOWED_ROOTS: promptRoot }
+});
+await handoffPromptClient.request('initialize', {
+  protocolVersion: '2024-11-05',
+  capabilities: {},
+  clientInfo: { name: 'codexpro-prompt-file-smoke', version: '0.1.0' }
+});
+handoffPromptClient.notify('notifications/initialized');
+const promptOpen = await handoffPromptClient.request('tools/call', { name: 'open_current_workspace', arguments: { include_tree: false } });
+const promptWs = promptOpen.structuredContent.workspace_id;
+await expectToolError(
+  'write',
+  { workspace_id: promptWs, path: 'notes.md', content: 'source write should remain blocked\n' },
+  /handoff|Source writes are disabled|\.ai-bridge/i,
+  handoffPromptClient
+);
+
+const savedPrompt = await handoffPromptClient.request('tools/call', {
+  name: 'save_prompt_file',
+  arguments: {
+    workspace_id: promptWs,
+    target: 'ai_bridge',
+    title: 'Smoke Prompt File',
+    prompt: 'Paste this into Codex:\n\nImplement the smoke prompt file check.'
+  }
+});
+const aiBridgePromptPath = assertSavedUnder(savedPrompt, '.ai-bridge/prompts/');
+const aiBridgePromptText = await fs.readFile(fileForRel(promptRoot, aiBridgePromptPath), 'utf8');
+if (!aiBridgePromptText.includes('Implement the smoke prompt file check.')) {
+  throw new Error('saved ai_bridge prompt did not contain supplied prompt text');
+}
+
+const chatgptGeneratedPrompt = await handoffPromptClient.request('tools/call', {
+  name: 'save_prompt_file',
+  arguments: {
+    workspace_id: promptWs,
+    target: 'chatgpt_generated',
+    title: 'Generated Prompt Smoke',
+    prompt: 'Generated prompt target smoke text.'
+  }
+});
+const chatgptGeneratedPath = assertSavedUnder(chatgptGeneratedPrompt, 'docs/chatgpt/generated-prompts/');
+await fs.stat(fileForRel(promptRoot, chatgptGeneratedPath));
+
+const loopInboxPrompt = await handoffPromptClient.request('tools/call', {
+  name: 'save_prompt_file',
+  arguments: {
+    workspace_id: promptWs,
+    target: 'loop_inbox',
+    title: 'Loop Inbox Prompt Smoke',
+    prompt: 'Loop inbox prompt target smoke text.'
+  }
+});
+const loopInboxPath = assertSavedUnder(loopInboxPrompt, 'docs/loop/inbox/');
+await fs.stat(fileForRel(promptRoot, loopInboxPath));
+
+const namedPrompt = await handoffPromptClient.request('tools/call', {
+  name: 'save_prompt_file',
+  arguments: {
+    workspace_id: promptWs,
+    target: 'ai_bridge',
+    filename: 'my-test-prompt.md',
+    overwrite: false,
+    prompt: 'Named prompt first write.'
+  }
+});
+if (namedPrompt.structuredContent.path !== '.ai-bridge/prompts/my-test-prompt.md') {
+  throw new Error(`safe filename wrote unexpected path: ${namedPrompt.structuredContent.path}`);
+}
+await expectToolError(
+  'save_prompt_file',
+  { workspace_id: promptWs, target: 'ai_bridge', filename: 'my-test-prompt.md', overwrite: false, prompt: 'Named prompt duplicate.' },
+  /already exists|overwrite=false/i,
+  handoffPromptClient
+);
+const overwrittenPrompt = await handoffPromptClient.request('tools/call', {
+  name: 'save_prompt_file',
+  arguments: {
+    workspace_id: promptWs,
+    target: 'ai_bridge',
+    filename: 'my-test-prompt.md',
+    overwrite: true,
+    prompt: 'Named prompt overwritten.'
+  }
+});
+if (!overwrittenPrompt.structuredContent.existed) throw new Error('overwrite=true did not report an existing prompt file');
+
+for (const unsafeFilename of ['../evil.md', 'nested/evil.md', 'C:\\temp\\evil.md', '.hidden.md', 'evil.ts']) {
+  await expectToolError(
+    'save_prompt_file',
+    { workspace_id: promptWs, target: 'ai_bridge', filename: unsafeFilename, prompt: 'unsafe filename should fail' },
+    /filename|extension|hidden|\.\./i,
+    handoffPromptClient
+  );
+}
+await expectToolError(
+  'save_prompt_file',
+  { workspace_id: promptWs, target: 'ai_bridge', filename: 'secret-prompt.md', prompt: 'OPENAI_API_KEY=sk-realSecretValue123\n' },
+  /Secret-looking content is blocked/i,
+  handoffPromptClient
+);
+const envRefPrompt = await handoffPromptClient.request('tools/call', {
+  name: 'save_prompt_file',
+  arguments: {
+    workspace_id: promptWs,
+    target: 'ai_bridge',
+    filename: 'env-ref-prompt.txt',
+    prompt: 'Use OPENAI_API_KEY=process.env.OPENAI_API_KEY or [REDACTED_SECRET] as placeholders.'
+  }
+});
+const envRefPromptText = await fs.readFile(fileForRel(promptRoot, envRefPrompt.structuredContent.path), 'utf8');
+if (!envRefPromptText.includes('process.env.OPENAI_API_KEY')) {
+  throw new Error('env-var reference prompt was not saved');
+}
+handoffPromptClient.close();
 
 const nonGitRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-non-git-'));
 await fs.writeFile(path.join(nonGitRoot, 'README.md'), '# Non-git fixture\n', 'utf8');

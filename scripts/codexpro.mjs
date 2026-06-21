@@ -57,7 +57,7 @@ Options:
   --bash <off|safe|full>    Bash mode. Default: off.
   --write <off|handoff|workspace>
                              Write mode. Default: handoff.
-                             handoff = ChatGPT can write .ai-bridge only; Codex edits source.
+                             handoff = write/edit stay in .ai-bridge; save_prompt_file has fixed prompt dirs.
   --tool-mode <minimal|standard|full>
                              Tool surface exposed to ChatGPT. Default: standard.
                              minimal = open/read/write/edit/bash/show_changes only.

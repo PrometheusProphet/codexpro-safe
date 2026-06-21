@@ -13,6 +13,7 @@ import { buildProContext, exportProContext } from "./proContext.js";
 import { codexproInventory, loadSkill } from "./capabilitiesOps.js";
 import { TOOL_CARD_MIME_TYPE, TOOL_CARD_URI, toolCardWidgetHtml } from "./toolCardWidget.js";
 import { redactSensitiveText, redactStructured } from "./redact.js";
+import { savePromptFile } from "./promptFileOps.js";
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return redactSensitiveText(`${error.name}: ${error.message}`);
@@ -186,6 +187,7 @@ const STANDARD_TOOL_NAMES = [
   "search",
   "load_skill",
   "read_handoff",
+  "save_prompt_file",
   "export_pro_context",
   "handoff_to_agent"
 ] as const;
@@ -210,6 +212,7 @@ const FULL_TOOL_NAMES = [
   "show_changes",
   "read_handoff",
   "codex_context",
+  "save_prompt_file",
   "export_pro_context",
   "handoff_to_agent",
   "handoff_to_codex"
@@ -1174,6 +1177,54 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         additions: result.diff.additions,
         deletions: result.diff.deletions,
         diff: result.diff.diff
+      });
+    }
+  );
+
+  registerCodexTool(
+    config,
+    server,
+    "save_prompt_file",
+    {
+      title: "Save Prompt File",
+      description:
+        "Save a generated Codex prompt as a Markdown/text file only under .ai-bridge/prompts, docs/chatgpt/generated-prompts, or docs/loop/inbox. Works in handoff write mode, does not enable source writes, and does not execute commands.",
+      inputSchema: {
+        workspace_id: z.string().optional().describe("Workspace id from open_workspace. Omit to use default workspace."),
+        target: z.enum(["ai_bridge", "chatgpt_generated", "loop_inbox"]).optional().describe("Approved prompt target. Default: ai_bridge."),
+        title: z.string().optional().describe("Title used to generate a safe timestamped Markdown filename when filename is omitted."),
+        prompt: z.string().describe("Generated Codex prompt content to save."),
+        filename: z.string().optional().describe("Optional basename only, with .md or .txt extension. No directories, hidden names, traversal, or source extensions."),
+        overwrite: z.boolean().optional().describe("Allow overwriting an existing prompt file. Default follows the write tool behavior.")
+      },
+      annotations: HANDOFF_WRITE_ANNOTATIONS,
+      _meta: {
+        ...toolCardMeta(),
+        "openai/toolInvocation/invoking": "Saving prompt file...",
+        "openai/toolInvocation/invoked": "Prompt file saved"
+      }
+    },
+    async (args) => {
+      const workspace = workspaces.getWorkspace(args.workspace_id);
+      const result = await savePromptFile(config, guard, workspace, {
+        target: args.target,
+        title: args.title,
+        prompt: String(args.prompt ?? ""),
+        filename: args.filename,
+        overwrite: args.overwrite
+      });
+      const text = `# Save Prompt File\n\nSaved: ${result.path}\nTarget: ${result.target}\nExisted before: ${result.existed}\nBytes: ${result.bytes}\nSHA-256: ${result.sha256}\nDiff stats: +${result.additions} -${result.deletions}`;
+      return textResult(text, {
+        workspace_id: workspace.id,
+        root: workspace.root,
+        target: result.target,
+        path: result.path,
+        bytes: result.bytes,
+        sha256: result.sha256,
+        existed: result.existed,
+        additions: result.additions,
+        deletions: result.deletions,
+        diff: result.diff
       });
     }
   );
