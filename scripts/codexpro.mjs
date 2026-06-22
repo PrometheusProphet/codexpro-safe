@@ -15,6 +15,7 @@ const DEFAULT_MODE = 'handoff';
 const DEFAULT_BASH = 'off';
 const DEFAULT_WRITE = 'handoff';
 const DEFAULT_TOOL_MODE = 'standard';
+const DEFAULT_TOOL_CARD_MODE = 'off';
 const DEFAULT_WIDGET_DOMAIN = 'https://rebel0789.github.io';
 
 function usage() {
@@ -62,8 +63,11 @@ Options:
                              Tool surface exposed to ChatGPT. Default: standard.
                              minimal = open/read/write/edit/bash/show_changes only.
                              full = expose every compatibility and advanced tool.
+  --tool-card-mode <off|compact>
+                             Custom ChatGPT HTML tool cards. Default: off.
+                             compact = advertise the bundled Apps SDK card resource.
   --widget-domain <origin>   Dedicated HTTPS origin for ChatGPT widget iframes.
-                             Required for app submission. Default: https://rebel0789.github.io.
+                             Used when compact cards are enabled. Default: https://rebel0789.github.io.
   --tunnel <none|cloudflare|cloudflare-named|ngrok>
                              Expose local MCP. Default: none (local-only).
                              cloudflare = quick tunnel with a new URL each restart.
@@ -1479,10 +1483,11 @@ function printConnectorBlock(endpoint, token, options = {}) {
 
   const mode = options.mode ?? 'agent';
   const modeTitle = mode === 'agent' ? 'Agent' : mode === 'handoff' ? 'Handoff' : 'Pro planning';
+  const toolCardMode = options.toolCardMode ?? DEFAULT_TOOL_CARD_MODE;
   console.log('');
   console.log(paint('bold', 'CodexPro ready'));
   if (options.root) console.log(`  Workspace  ${options.root}`);
-  console.log(`  Mode       ${modeTitle}  tools=${options.toolMode ?? DEFAULT_TOOL_MODE}  write=${options.write ?? DEFAULT_WRITE}  bash=${options.bash ?? DEFAULT_BASH}`);
+  console.log(`  Mode       ${modeTitle}  tools=${options.toolMode ?? DEFAULT_TOOL_MODE}  cards=${toolCardMode}  write=${options.write ?? DEFAULT_WRITE}  bash=${options.bash ?? DEFAULT_BASH}`);
   console.log(`  Connector  ${publicHttps ? 'public HTTPS' : 'local HTTP'}`);
   if (token && !options.allowQueryToken) {
     console.log('  Auth       Authorization: Bearer <token>');
@@ -1508,7 +1513,7 @@ function printConnectorBlock(endpoint, token, options = {}) {
     ? 'Next: press Enter to open ChatGPT, paste the Server URL, and configure Authorization: Bearer token if supported.'
     : 'Next: press Enter to open ChatGPT, paste the copied Server URL, choose Authentication: None.');
   console.log('Keys: Enter open | c copy | o status | h help | q quit');
-  return { ...details, copied, opened, mode, toolMode: options.toolMode ?? DEFAULT_TOOL_MODE };
+  return { ...details, copied, opened, mode, toolMode: options.toolMode ?? DEFAULT_TOOL_MODE, toolCardMode };
 }
 
 function printControlHelp() {
@@ -1780,6 +1785,7 @@ function profileFromPreference(root, args, profile, preference) {
   const bash = optionValue(args, profile, 'bash', ['CODEXPRO_BASH_MODE'], '');
   const write = optionValue(args, profile, 'write', ['CODEXPRO_WRITE_MODE'], '');
   const toolMode = optionValue(args, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], '');
+  const toolCardMode = optionValue(args, profile, 'toolCardMode', ['CODEXPRO_TOOL_CARD_MODE'], '');
   const widgetDomain = optionValue(args, profile, 'widgetDomain', ['CODEXPRO_WIDGET_DOMAIN'], '');
   const existingToken = optionValue(args, profile, 'token', ['CODEXPRO_HTTP_TOKEN', 'CODEBASE_BRIDGE_HTTP_TOKEN'], '');
   const token = preference.tunnel === 'none' ? existingToken : stableToken(existingToken);
@@ -1796,6 +1802,7 @@ function profileFromPreference(root, args, profile, preference) {
     ...(bash ? { bash } : {}),
     ...(write ? { write } : {}),
     ...(toolMode ? { toolMode } : {}),
+    ...(toolCardMode ? { toolCardMode } : {}),
     ...(widgetDomain ? { widgetDomain } : {}),
     ...(args.noInstallCloudflared ? { noInstallCloudflared: true } : {}),
     root
@@ -1890,10 +1897,12 @@ async function runSetupWizard(argv) {
     const bash = optionValue(defaults, profile, 'bash', ['CODEXPRO_BASH_MODE'], DEFAULT_BASH);
     const write = optionValue(defaults, profile, 'write', ['CODEXPRO_WRITE_MODE'], DEFAULT_WRITE);
     const toolMode = optionValue(defaults, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], '');
+    const toolCardMode = optionValue(defaults, profile, 'toolCardMode', ['CODEXPRO_TOOL_CARD_MODE'], '');
     const widgetDomain = optionValue(defaults, profile, 'widgetDomain', ['CODEXPRO_WIDGET_DOMAIN'], '');
     if (bash) args.push('--bash', bash);
     if (write) args.push('--write', write);
     if (toolMode) args.push('--tool-mode', toolMode);
+    if (toolCardMode) args.push('--tool-card-mode', toolCardMode);
     if (widgetDomain) args.push('--widget-domain', widgetDomain);
     if (defaults.installCloudflared) args.push('--install-cloudflared');
     if (defaults.openChatgpt) args.push('--open-chatgpt');
@@ -1968,6 +1977,7 @@ async function runSetupWizard(argv) {
         ...(bash ? { bash } : {}),
         ...(write ? { write } : {}),
         ...(toolMode ? { toolMode } : {}),
+        ...(toolCardMode ? { toolCardMode } : {}),
         ...(widgetDomain ? { widgetDomain } : {}),
         ...(defaults.noInstallCloudflared ? { noInstallCloudflared: true } : {})
       });
@@ -2007,6 +2017,9 @@ function printProfile(root, profile) {
     ...(safe.hostname ? [labelValue('Hostname', safe.hostname)] : []),
     ...(safe.port ? [labelValue('Port', safe.port)] : []),
     ...(safe.mode ? [labelValue('Mode', safe.mode)] : []),
+    ...(safe.toolMode ? [labelValue('Tool mode', safe.toolMode)] : []),
+    ...(safe.toolCardMode ? [labelValue('Tool cards', safe.toolCardMode)] : []),
+    ...(safe.widgetDomain ? [labelValue('Widget domain', safe.widgetDomain)] : []),
     ...(safe.token ? [labelValue('Token', safe.token)] : [])
   ]);
 }
@@ -2033,6 +2046,8 @@ function saveSettingsFromArgs(root, args, profile) {
   }
   const mode = optionValue(args, profile, 'mode', ['CODEXPRO_MODE'], profile.mode ?? DEFAULT_MODE);
   const toolMode = optionValue(args, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], profile.toolMode ?? '');
+  const toolCardMode = optionValue(args, profile, 'toolCardMode', ['CODEXPRO_TOOL_CARD_MODE'], profile.toolCardMode ?? '');
+  if (toolCardMode && !['off', 'compact'].includes(toolCardMode)) throw new Error('--tool-card-mode must be off or compact');
   const widgetDomain = optionValue(args, profile, 'widgetDomain', ['CODEXPRO_WIDGET_DOMAIN'], profile.widgetDomain ?? '');
   const port = String(optionValue(args, profile, 'port', ['CODEXPRO_PORT'], profile.port ?? '8787'));
   const token = tunnel === 'none'
@@ -2051,6 +2066,7 @@ function saveSettingsFromArgs(root, args, profile) {
     ...(args.bash ?? profile.bash ? { bash: args.bash ?? profile.bash } : {}),
     ...(args.write ?? profile.write ? { write: args.write ?? profile.write } : {}),
     ...(toolMode ? { toolMode } : {}),
+    ...(toolCardMode ? { toolCardMode } : {}),
     ...(widgetDomain ? { widgetDomain } : {}),
     ...(args.noInstallCloudflared ?? profile.noInstallCloudflared ? { noInstallCloudflared: true } : {})
   });
@@ -2372,10 +2388,12 @@ async function main() {
   const bash = optionValue(args, profile, 'bash', ['CODEXPRO_BASH_MODE'], DEFAULT_BASH);
   const write = optionValue(args, profile, 'write', ['CODEXPRO_WRITE_MODE'], DEFAULT_WRITE);
   const toolMode = optionValue(args, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], DEFAULT_TOOL_MODE);
+  const toolCardMode = optionValue(args, profile, 'toolCardMode', ['CODEXPRO_TOOL_CARD_MODE'], DEFAULT_TOOL_CARD_MODE);
   const widgetDomain = optionValue(args, profile, 'widgetDomain', ['CODEXPRO_WIDGET_DOMAIN'], DEFAULT_WIDGET_DOMAIN);
   if (!['off', 'safe', 'full'].includes(bash)) throw new Error('--bash must be off, safe, or full');
   if (!['off', 'handoff', 'workspace'].includes(write)) throw new Error('--write must be off, handoff, or workspace');
   if (!['minimal', 'standard', 'full'].includes(toolMode)) throw new Error('--tool-mode must be minimal, standard, or full');
+  if (!['off', 'compact'].includes(toolCardMode)) throw new Error('--tool-card-mode must be off or compact');
 
   let token = args.noAuth ? '' : optionValue(args, profile, 'token', ['CODEXPRO_HTTP_TOKEN', 'CODEBASE_BRIDGE_HTTP_TOKEN'], '');
   if (!token && tunnel !== 'none') token = stableToken();
@@ -2390,6 +2408,7 @@ async function main() {
     CODEXPRO_BASH_MODE: bash,
     CODEXPRO_WRITE_MODE: write,
     CODEXPRO_TOOL_MODE: toolMode,
+    CODEXPRO_TOOL_CARD_MODE: toolCardMode,
     CODEXPRO_WIDGET_DOMAIN: widgetDomain,
     CODEXPRO_MODE: mode,
     CODEXPRO_TUNNEL_MODE: tunnel === 'none' ? '0' : '1',
@@ -2415,7 +2434,7 @@ async function main() {
 
   printBox('CodexPro start', [
     labelValue('Workspace', root),
-    labelValue('Mode', `${mode}  tools=${toolMode}  write=${write}  bash=${bash}`),
+    labelValue('Mode', `${mode}  tools=${toolMode}  cards=${toolCardMode}  write=${write}  bash=${bash}`),
     labelValue('Local URL', `http://${host}:${port}/mcp`),
     labelValue(
       'Tunnel',
@@ -2452,6 +2471,7 @@ async function main() {
       openChatgpt: Boolean(args.openChatgpt),
       mode,
       toolMode,
+      toolCardMode,
       root,
       write,
       bash,
@@ -2491,6 +2511,7 @@ async function main() {
       openChatgpt: Boolean(args.openChatgpt),
       mode,
       toolMode,
+      toolCardMode,
       root,
       write,
       bash,
@@ -2511,6 +2532,7 @@ async function main() {
       openChatgpt: Boolean(args.openChatgpt),
       mode,
       toolMode,
+      toolCardMode,
       root,
       write,
       bash,
@@ -2530,6 +2552,7 @@ async function main() {
       openChatgpt: Boolean(args.openChatgpt),
       mode,
       toolMode,
+      toolCardMode,
       root,
       write,
       bash,
@@ -2594,6 +2617,7 @@ async function main() {
     openChatgpt: Boolean(args.openChatgpt),
     mode,
     toolMode,
+    toolCardMode,
     root,
     write,
     bash,

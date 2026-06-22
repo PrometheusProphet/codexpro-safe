@@ -130,7 +130,7 @@ if (commitResult.status !== 0) {
 
 const client = new McpStdioClient('node', ['dist/stdio.js', '--root', tmp, '--allow-root', tmp, '--bash', bashAvailable ? 'safe' : 'off', '--write', 'workspace', '--tool-mode', 'full'], {
   cwd: path.resolve('.'),
-  env: { ...process.env, CODEXPRO_ROOT: tmp, CODEXPRO_ALLOWED_ROOTS: tmp, CODEXPRO_WIDGET_DOMAIN: 'https://widgets.codexpro.test' }
+  env: { ...process.env, CODEXPRO_ROOT: tmp, CODEXPRO_ALLOWED_ROOTS: tmp, CODEXPRO_WIDGET_DOMAIN: 'https://widgets.codexpro.test', CODEXPRO_TOOL_CARD_MODE: '' }
 });
 
 await client.request('initialize', {
@@ -150,24 +150,77 @@ function hasWidgetMeta(name) {
   const meta = toolsByName.get(name)?._meta ?? {};
   return meta.ui?.resourceUri === toolCardUri || meta['openai/outputTemplate'] === toolCardUri;
 }
+async function listResourcesOrEmpty(resourceClient) {
+  try {
+    return await resourceClient.request('resources/list', {});
+  } catch (error) {
+    if (String(error?.message ?? error).includes('Method not found')) return { resources: [] };
+    throw error;
+  }
+}
 async function expectToolError(name, args, pattern, toolClient = client) {
   const result = await toolClient.request('tools/call', { name, arguments: args });
   if (!result.isError) {
     throw new Error(`${name} unexpectedly succeeded`);
   }
   const text = result.content?.find?.((part) => part.type === 'text')?.text ?? JSON.stringify(result.structuredContent);
+  if (!text.trim()) {
+    throw new Error(`${name} error did not include readable text`);
+  }
+  if (!result.structuredContent?.error) {
+    throw new Error(`${name} error did not include structuredContent.error`);
+  }
   if (pattern && !pattern.test(text)) {
     throw new Error(`${name} error did not match ${pattern}: ${text}`);
   }
+  return result;
 }
-for (const visualTool of toolNames) {
-  if (!hasWidgetMeta(visualTool)) throw new Error(`${visualTool} should render the CodexPro widget`);
+for (const normalTool of toolNames) {
+  if (hasWidgetMeta(normalTool)) throw new Error(`${normalTool} should not advertise the CodexPro widget by default`);
 }
-const resources = await client.request('resources/list', {});
+const resources = await listResourcesOrEmpty(client);
 const toolCard = resources.resources.find((resource) => resource.uri === toolCardUri);
-if (!toolCard) throw new Error(`missing tool-card resource: ${toolCardUri}`);
-if (toolCard.mimeType !== 'text/html;profile=mcp-app') throw new Error(`unexpected tool-card mime type: ${toolCard.mimeType}`);
-const widget = await client.request('resources/read', { uri: toolCardUri });
+if (toolCard) throw new Error(`default resources/list should not include tool-card resource: ${toolCardUri}`);
+const configResult = await client.request('tools/call', { name: 'server_config', arguments: {} });
+if (!configResult.content?.find?.((part) => part.type === 'text')?.text?.includes('CodexPro Server Config')) {
+  throw new Error('server_config did not return readable text content');
+}
+if (configResult.structuredContent.codexpro_tool !== 'server_config') {
+  throw new Error('server_config result was not tagged');
+}
+if (configResult.structuredContent.toolCardMode !== 'off') {
+  throw new Error(`server_config did not expose default toolCardMode=off: ${configResult.structuredContent.toolCardMode}`);
+}
+await expectToolError('read', { path: '.npmrc' }, /blocked/i);
+
+const compactClient = new McpStdioClient('node', ['dist/stdio.js', '--root', tmp, '--allow-root', tmp, '--bash', bashAvailable ? 'safe' : 'off', '--write', 'workspace', '--tool-mode', 'full', '--tool-card-mode', 'compact'], {
+  cwd: path.resolve('.'),
+  env: { ...process.env, CODEXPRO_ROOT: tmp, CODEXPRO_ALLOWED_ROOTS: tmp, CODEXPRO_WIDGET_DOMAIN: 'https://widgets.codexpro.test', CODEXPRO_TOOL_CARD_MODE: 'compact' }
+});
+await compactClient.request('initialize', {
+  protocolVersion: '2024-11-05',
+  capabilities: {},
+  clientInfo: { name: 'codexpro-compact-card-smoke', version: '0.1.0' }
+});
+compactClient.notify('notifications/initialized');
+const compactTools = await compactClient.request('tools/list', {});
+const compactToolNames = compactTools.tools.map((tool) => tool.name);
+const compactToolsByName = new Map(compactTools.tools.map((tool) => [tool.name, tool]));
+function hasCompactWidgetMeta(name) {
+  const meta = compactToolsByName.get(name)?._meta ?? {};
+  return meta.ui?.resourceUri === toolCardUri || meta['openai/outputTemplate'] === toolCardUri;
+}
+for (const expected of toolNames) {
+  if (!compactToolNames.includes(expected)) throw new Error(`compact mode missing tool: ${expected}`);
+}
+for (const visualTool of compactToolNames) {
+  if (!hasCompactWidgetMeta(visualTool)) throw new Error(`${visualTool} should render the CodexPro widget in compact mode`);
+}
+const compactResources = await compactClient.request('resources/list', {});
+const compactToolCard = compactResources.resources.find((resource) => resource.uri === toolCardUri);
+if (!compactToolCard) throw new Error(`compact resources/list missing tool-card resource: ${toolCardUri}`);
+if (compactToolCard.mimeType !== 'text/html;profile=mcp-app') throw new Error(`unexpected tool-card mime type: ${compactToolCard.mimeType}`);
+const widget = await compactClient.request('resources/read', { uri: toolCardUri });
 const widgetText = widget.contents?.[0]?.text ?? '';
 const widgetMeta = widget.contents?.[0]?._meta ?? {};
 if (!widgetText.includes('Waiting for tool result') || !widgetText.includes('renderWorkspace') || !widgetText.includes('renderSelfTest') || !widgetText.includes('details class="fold"') || !widgetText.includes('ui/notifications/tool-result')) {
@@ -179,6 +232,7 @@ if (!widgetMeta.ui?.csp || !widgetMeta['openai/widgetCSP']) {
 if (widgetMeta.ui?.domain !== 'https://widgets.codexpro.test' || widgetMeta['openai/widgetDomain'] !== 'https://widgets.codexpro.test') {
   throw new Error('tool-card widget resource did not expose standard and ChatGPT widget domain metadata');
 }
+compactClient.close();
 const current = await client.request('tools/call', { name: 'open_current_workspace', arguments: { include_tree: false } });
 const realTmp = await fs.realpath(tmp);
 if (current.structuredContent.root !== realTmp) throw new Error(`open_current_workspace opened ${current.structuredContent.root}, expected ${realTmp}`);

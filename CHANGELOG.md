@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Made bundled ChatGPT HTML tool cards opt-in with `--tool-card-mode compact` / `CODEXPRO_TOOL_CARD_MODE=compact`; the default no longer advertises custom widget metadata or registers the widget resource, reducing long-chat UI bloat while preserving tool text, structured data, errors, and compact-card opt-in.
+
 ## 0.28.5
 
 - Fixed path-scoped `show_changes` so unrelated workspace status is not reported for a clean requested path.

@@ -47,6 +47,8 @@ const saved = run([
   'agent',
   '--tool-mode',
   'full',
+  '--tool-card-mode',
+  'compact',
   '--widget-domain',
   'https://widgets.codexpro.test',
   '--token',
@@ -57,7 +59,7 @@ if (!saved.includes('Saved workspace settings')) {
 }
 
 const shown = run(['settings', 'show', '--root', root], env);
-for (const expected of ['Tunnel', 'ngrok', 'codexpro-test.ngrok-free.app', '19087', '<saved>']) {
+for (const expected of ['Tunnel', 'ngrok', 'codexpro-test.ngrok-free.app', '19087', 'Tool cards', 'compact', '<saved>']) {
   if (!shown.includes(expected)) {
     throw new Error(`settings show missing ${expected}\n${shown}`);
   }
@@ -66,7 +68,7 @@ if (shown.includes('codexpro-settings-token')) {
   throw new Error(`settings show leaked token\n${shown}`);
 }
 const profile = await readProfile(root, home);
-if (profile.toolMode !== 'full' || profile.widgetDomain !== 'https://widgets.codexpro.test') {
+if (profile.toolMode !== 'full' || profile.toolCardMode !== 'compact' || profile.widgetDomain !== 'https://widgets.codexpro.test') {
   throw new Error(`settings profile did not persist tool/widget options: ${JSON.stringify(profile)}`);
 }
 
@@ -81,10 +83,14 @@ if (!reused.includes('Saved workspace settings from')) {
 }
 
 const reusedShown = run(['settings', 'show', '--root', reuseRoot], env);
-for (const expected of ['ngrok', 'codexpro-test.ngrok-free.app', '<saved>']) {
+for (const expected of ['ngrok', 'codexpro-test.ngrok-free.app', 'Tool cards', 'compact', '<saved>']) {
   if (!reusedShown.includes(expected)) {
     throw new Error(`reused settings show missing ${expected}\n${reusedShown}`);
   }
+}
+const reusedProfile = await readProfile(reuseRoot, home);
+if (reusedProfile.toolCardMode !== 'compact') {
+  throw new Error(`settings use did not preserve toolCardMode: ${JSON.stringify(reusedProfile)}`);
 }
 
 const deleted = run(['settings', 'delete', '--root', root, '--yes'], env);

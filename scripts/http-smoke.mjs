@@ -135,6 +135,17 @@ async function callTool(client, name, args = {}) {
   return result;
 }
 
+async function listResourcesOrEmpty(client) {
+  try {
+    return await client.listResources();
+  } catch (error) {
+    if (error?.code === -32601 || String(error?.message ?? error).includes('Method not found')) {
+      return { resources: [] };
+    }
+    throw error;
+  }
+}
+
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-http-smoke-'));
 await fs.mkdir(path.join(root, '.codex', 'skills', 'http-smoke-skill'), { recursive: true });
 await fs.writeFile(path.join(root, '.codex', 'skills', 'http-smoke-skill', 'SKILL.md'), [
@@ -159,6 +170,7 @@ const child = spawn('node', ['dist/http.js'], {
     CODEXPRO_BASH_MODE: 'off',
     CODEXPRO_WRITE_MODE: 'handoff',
     CODEXPRO_TOOL_MODE: 'full',
+    CODEXPRO_TOOL_CARD_MODE: 'compact',
     CODEXPRO_WIDGET_DOMAIN: 'https://widgets.codexpro.test'
   },
   stdio: ['ignore', 'pipe', 'pipe']
@@ -328,6 +340,57 @@ try {
   await fs.stat(path.join(root, '.ai-bridge', 'pro-context.md'));
 } finally {
   child.kill('SIGTERM');
+}
+
+const defaultOffRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-http-default-off-'));
+const defaultOffPort = await getFreePort();
+const defaultOffToken = 'codexpro-http-default-off-token';
+const defaultOffChild = spawn('node', ['dist/http.js'], {
+  cwd: path.resolve('.'),
+  env: {
+    ...process.env,
+    CODEXPRO_ROOT: defaultOffRoot,
+    CODEXPRO_ALLOWED_ROOTS: defaultOffRoot,
+    CODEXPRO_PORT: String(defaultOffPort),
+    CODEXPRO_HTTP_TOKEN: defaultOffToken,
+    CODEXPRO_BASH_MODE: 'off',
+    CODEXPRO_WRITE_MODE: 'handoff',
+    CODEXPRO_TOOL_MODE: 'full',
+    CODEXPRO_TOOL_CARD_MODE: ''
+  },
+  stdio: ['ignore', 'pipe', 'pipe']
+});
+
+try {
+  await waitForListening(defaultOffChild);
+  const defaultOffMcpUrl = `http://127.0.0.1:${defaultOffPort}/mcp`;
+  const defaultOffTools = await listTools(defaultOffMcpUrl, defaultOffToken);
+  const defaultOffToolNames = toolNames(defaultOffTools);
+  for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'load_skill', 'show_changes', 'codex_context', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {
+    if (!defaultOffToolNames.includes(expected)) {
+      throw new Error(`default-off HTTP tools/list missing ${expected}; got ${defaultOffToolNames.join(', ')}`);
+    }
+  }
+  const toolCardUri = 'ui://widget/codexpro-tool-card-v9.html';
+  for (const normalTool of defaultOffToolNames) {
+    if (hasWidgetMeta(defaultOffTools, normalTool, toolCardUri)) {
+      throw new Error(`${normalTool} should not advertise the CodexPro widget by default over HTTP`);
+    }
+  }
+  await withClient(defaultOffMcpUrl, defaultOffToken, async (client) => {
+    const resources = await listResourcesOrEmpty(client);
+    const toolCard = resources.resources.find((resource) => resource.uri === toolCardUri);
+    if (toolCard) throw new Error(`default-off HTTP resources/list should not include ${toolCardUri}`);
+    const config = await callTool(client, 'server_config');
+    if (config.structuredContent.codexpro_tool !== 'server_config') {
+      throw new Error('default-off HTTP server_config result was not tagged');
+    }
+    if (config.structuredContent.toolCardMode !== 'off') {
+      throw new Error(`default-off HTTP server_config did not expose toolCardMode=off: ${config.structuredContent.toolCardMode}`);
+    }
+  });
+} finally {
+  defaultOffChild.kill('SIGTERM');
 }
 
 const queryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-http-query-opt-in-'));

@@ -51,7 +51,8 @@ function tagToolResult(result: any, name: string, options: Record<string, unknow
   return result;
 }
 
-function toolCardMeta(): Record<string, unknown> {
+function toolCardMeta(config: CodexProConfig): Record<string, unknown> {
+  if (config.toolCardMode !== "compact") return {};
   return {
     ui: { resourceUri: TOOL_CARD_URI },
     "openai/outputTemplate": TOOL_CARD_URI
@@ -68,6 +69,7 @@ function logToolCall(name: string, status: "ok" | "error", started: number): voi
 }
 
 function registerToolCardResource(server: McpServer, config: CodexProConfig): void {
+  if (config.toolCardMode !== "compact") return;
   const s = server as any;
   if (typeof s.registerResource !== "function") return;
   s.registerResource(
@@ -531,7 +533,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       inputSchema: {},
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Reading CodexPro server config...",
         "openai/toolInvocation/invoked": "CodexPro server config ready"
       }
@@ -551,6 +553,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         bashMode: config.bashMode,
         writeMode: config.writeMode,
         toolMode: config.toolMode,
+        toolCardMode: config.toolCardMode,
         inheritEnv: config.inheritEnv,
         contextDir: config.contextDir,
         maxReadBytes: config.maxReadBytes,
@@ -581,7 +584,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: HANDOFF_WRITE_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Running CodexPro self-test...",
         "openai/toolInvocation/invoked": "CodexPro self-test complete"
       }
@@ -785,7 +788,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Reading CodexPro inventory...",
         "openai/toolInvocation/invoked": "CodexPro inventory ready"
       }
@@ -803,11 +806,12 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         bash_mode: config.bashMode,
         write_mode: config.writeMode,
         tool_mode: config.toolMode,
+        tool_card_mode: config.toolCardMode,
         skills: inventory.skills,
         skill_count: inventory.skills.length,
         mcp_servers: inventory.mcpServers,
         mcp_server_count: inventory.mcpServers.length,
-        widget_uri: TOOL_CARD_URI
+        widget_uri: config.toolCardMode === "compact" ? TOOL_CARD_URI : null
       });
     }
   );
@@ -830,7 +834,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Loading skill instructions...",
         "openai/toolInvocation/invoked": "Skill instructions loaded"
       }
@@ -868,7 +872,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       inputSchema: {},
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Listing CodexPro workspaces...",
         "openai/toolInvocation/invoked": "CodexPro workspaces listed"
       }
@@ -898,7 +902,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: SESSION_READ_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Opening current CodexPro workspace...",
         "openai/toolInvocation/invoked": "Current CodexPro workspace opened"
       }
@@ -949,7 +953,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: SESSION_READ_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Opening CodexPro workspace...",
         "openai/toolInvocation/invoked": "CodexPro workspace opened"
       }
@@ -1000,7 +1004,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Collecting workspace snapshot...",
         "openai/toolInvocation/invoked": "Workspace snapshot ready"
       }
@@ -1050,7 +1054,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Listing workspace files...",
         "openai/toolInvocation/invoked": "Workspace files listed"
       }
@@ -1085,7 +1089,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Searching workspace...",
         "openai/toolInvocation/invoked": "Workspace search complete"
       }
@@ -1120,7 +1124,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Reading file...",
         "openai/toolInvocation/invoked": "File read"
       }
@@ -1153,7 +1157,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: LOCAL_WRITE_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Writing file...",
         "openai/toolInvocation/invoked": "File written"
       }
@@ -1199,7 +1203,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: HANDOFF_WRITE_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Saving prompt file...",
         "openai/toolInvocation/invoked": "Prompt file saved"
       }
@@ -1246,7 +1250,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: LOCAL_WRITE_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Editing file...",
         "openai/toolInvocation/invoked": "File edited"
       }
@@ -1290,7 +1294,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: BASH_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Running bash command...",
         "openai/toolInvocation/invoked": "Bash command finished"
       }
@@ -1318,7 +1322,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Reading git status...",
         "openai/toolInvocation/invoked": "Git status ready"
       }
@@ -1354,7 +1358,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Reading git diff...",
         "openai/toolInvocation/invoked": "Git diff ready"
       }
@@ -1409,7 +1413,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Summarizing workspace changes...",
         "openai/toolInvocation/invoked": "Workspace changes summarized"
       }
@@ -1468,7 +1472,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Reading agent handoff context...",
         "openai/toolInvocation/invoked": "Agent handoff context ready"
       }
@@ -1504,7 +1508,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Loading Codex context...",
         "openai/toolInvocation/invoked": "Codex context ready"
       }
@@ -1555,7 +1559,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: HANDOFF_WRITE_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Exporting Pro context...",
         "openai/toolInvocation/invoked": "Pro context exported"
       }
@@ -1607,7 +1611,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       },
       annotations: HANDOFF_WRITE_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Writing agent handoff plan...",
         "openai/toolInvocation/invoked": "Agent handoff plan written"
       }
@@ -1671,7 +1675,7 @@ ${result.prompt}
       },
       annotations: HANDOFF_WRITE_ANNOTATIONS,
       _meta: {
-        ...toolCardMeta(),
+        ...toolCardMeta(config),
         "openai/toolInvocation/invoking": "Writing Codex handoff plan...",
         "openai/toolInvocation/invoked": "Codex handoff plan written"
       }

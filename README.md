@@ -95,7 +95,7 @@ Account tier and model tool support are separate things. Plus/Pro can expose App
 
 ## Status
 
-CodexPro Safe is a public open-source MCP bridge with conservative defaults: local-only handoff mode, bash off, blocked secret paths, token-protected public URLs when tunnels are explicitly enabled, and compact visual cards for every tool result.
+CodexPro Safe is a public open-source MCP bridge with conservative defaults: local-only handoff mode, bash off, blocked secret paths, token-protected public URLs when tunnels are explicitly enabled, and custom ChatGPT HTML tool cards off by default.
 
 CodexPro does not bypass, avoid, increase, pool, resell, or modify ChatGPT, Codex, OpenAI, or third-party model limits. It does not provide models or account access. It only exposes local repo tools to the ChatGPT session the user already controls through official MCP and Developer Mode.
 
@@ -117,7 +117,7 @@ Relevant OpenAI references: [ChatGPT Developer Mode](https://developers.openai.c
 
 CodexPro defaults to `CODEXPRO_TOOL_MODE=standard`, which keeps ChatGPT's tool picker focused on the normal coding loop plus handoff/export workflows. Use `--tool-mode minimal` for the tightest demo surface, or `--tool-mode full` when you want every compatibility and debugging tool exposed.
 
-The smaller default tool list is deliberate. ChatGPT behaves better when routine work goes through a few high-signal tools instead of a large action catalog. Installed user/plugin skills are still discovered during workspace open; they are surfaced as context in the workspace card and can be loaded on demand with `load_skill`, not exposed as dozens of separate ChatGPT actions.
+The smaller default tool list is deliberate. ChatGPT behaves better when routine work goes through a few high-signal tools instead of a large action catalog. Installed user/plugin skills are still discovered during workspace open; they are surfaced as structured workspace context and can be loaded on demand with `load_skill`, not exposed as dozens of separate ChatGPT actions.
 
 Standard mode exposes:
 
@@ -200,13 +200,15 @@ The watcher writes the same review files as `execute-handoff`:
 
 ## Visual ChatGPT cards
 
-v0.28.5+ registers a reusable Apps SDK widget resource:
+CodexPro keeps custom ChatGPT HTML cards opt-in. By default, CodexPro does not advertise `_meta.ui.resourceUri` or `_meta["openai/outputTemplate"]` on tool descriptors, and it does not register the bundled widget resource. Tool text, structuredContent, errors, source inspection data, diffs, and verification output are unchanged.
+
+Use `--tool-card-mode compact` or `CODEXPRO_TOOL_CARD_MODE=compact` to restore the bundled Apps SDK widget resource:
 
 ```text
 ui://widget/codexpro-tool-card-v9.html
 ```
 
-Every CodexPro tool descriptor attaches that resource through `_meta.ui.resourceUri` and the ChatGPT compatibility key `_meta["openai/outputTemplate"]`. In ChatGPT Developer Mode this renders compact cards for:
+In compact mode, CodexPro tool descriptors attach that resource through `_meta.ui.resourceUri` and the ChatGPT compatibility key `_meta["openai/outputTemplate"]`. In ChatGPT Developer Mode this renders compact cards for:
 
 ```text
 server_config and codexpro_self_test
@@ -220,9 +222,9 @@ read_handoff, codex_context
 prompt saves and handoff/pro-context exports
 ```
 
-Cards stay compact by default. Git details, discovered skills, file trees, terminal output, context bundles, and raw diffs are folded or bounded so the chat does not fill with project inventory unless you open it.
+Compact cards fold or bound git details, discovered skills, file trees, terminal output, context bundles, and raw diffs so the chat does not fill with project inventory unless you open it.
 
-ChatGPT may still show some raw tool transcript around a card depending on the host UI and model behavior. CodexPro minimizes that by returning structured data, bounded previews, and a v9 card for every tool, but the ChatGPT client controls final transcript rendering.
+ChatGPT may still show platform-owned generic tool-call UI or transcript chrome depending on the host UI and model behavior. CodexPro can suppress only its own custom HTML widget advertisement; the ChatGPT client controls final transcript rendering.
 
 The visual cards are not unlocked by "normal coding mode" alone; the MCP server has to register an HTML resource with `text/html;profile=mcp-app` and point tool descriptors at it.
 
@@ -235,7 +237,7 @@ _meta.ui.csp
 _meta["openai/widgetCSP"]
 ```
 
-`CODEXPRO_WIDGET_DOMAIN` defaults to `https://rebel0789.github.io` for this package. For app submission, set it to a dedicated HTTPS origin you control, for example `https://widgets.yourdomain.com`. The CSP lists are intentionally strict because the widget has no external fetches, fonts, scripts, images, or iframes.
+`CODEXPRO_WIDGET_DOMAIN` defaults to `https://rebel0789.github.io` for this package and is used when compact cards are enabled. For app submission, set it to a dedicated HTTPS origin you control, for example `https://widgets.yourdomain.com`. The CSP lists are intentionally strict because the widget has no external fetches, fonts, scripts, images, or iframes.
 
 After upgrading or changing widget metadata, open the CodexPro app settings in ChatGPT Developer Mode and click `Refresh` / `Refresh actions` so ChatGPT reloads the tool descriptors and resource URI.
 

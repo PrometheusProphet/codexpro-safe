@@ -5,6 +5,7 @@ import path from "node:path";
 export type BashMode = "off" | "safe" | "full";
 export type WriteMode = "off" | "handoff" | "workspace";
 export type ToolMode = "minimal" | "standard" | "full";
+export type ToolCardMode = "off" | "compact";
 
 export interface CodexProConfig {
   defaultRoot: string;
@@ -20,6 +21,7 @@ export interface CodexProConfig {
   bashMode: BashMode;
   writeMode: WriteMode;
   toolMode: ToolMode;
+  toolCardMode: ToolCardMode;
   inheritEnv: boolean;
   maxReadBytes: number;
   maxWriteBytes: number;
@@ -185,6 +187,11 @@ function toolModeFrom(value: string | undefined): ToolMode {
   return "standard";
 }
 
+function toolCardModeFrom(value: string | undefined): ToolCardMode {
+  if (value === "off" || value === "compact") return value;
+  return "off";
+}
+
 function widgetDomainFrom(value: string | undefined): string {
   const raw = value?.trim() || "https://rebel0789.github.io";
   let parsed: URL;
@@ -269,6 +276,7 @@ export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
   const bashArg = typeof args.bash === "string" ? args.bash : undefined;
   const writeArg = typeof args.write === "string" ? args.write : undefined;
   const toolModeArg = typeof args["tool-mode"] === "string" ? args["tool-mode"] : undefined;
+  const toolCardModeArg = typeof args["tool-card-mode"] === "string" ? args["tool-card-mode"] : undefined;
   const widgetDomainArg = typeof args["widget-domain"] === "string" ? args["widget-domain"] : undefined;
   const extraBlockedGlobs = splitList(process.env.CODEXPRO_BLOCKED_GLOBS, ",");
   const host = hostArg ?? process.env.HOST ?? process.env.CODEXPRO_HOST ?? "127.0.0.1";
@@ -296,6 +304,7 @@ export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
     bashMode: bashModeFrom(bashArg ?? process.env.CODEXPRO_BASH_MODE),
     writeMode: writeModeFrom(writeArg ?? process.env.CODEXPRO_WRITE_MODE),
     toolMode: toolModeFrom(toolModeArg ?? process.env.CODEXPRO_TOOL_MODE),
+    toolCardMode: toolCardModeFrom(toolCardModeArg ?? process.env.CODEXPRO_TOOL_CARD_MODE),
     inheritEnv: process.env.CODEXPRO_INHERIT_ENV === "1",
     maxReadBytes: numberFrom(process.env.CODEXPRO_MAX_READ_BYTES, 180_000, 4_000, 2_000_000),
     maxWriteBytes: numberFrom(process.env.CODEXPRO_MAX_WRITE_BYTES, 1_000_000, 1_000, 10_000_000),
