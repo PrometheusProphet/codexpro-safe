@@ -94,12 +94,13 @@ ChatGPT can see explicit workspace context exposed by tools:
 - git diff
 - selected source files
 - file tree and search results
+- source outlines and small bounded line ranges
 
 It cannot read hidden Codex runtime memory or anything outside the allowed workspace unless you explicitly allow that root.
 
 ## What can ChatGPT edit?
 
-In normal coding mode, ChatGPT can write and exact-edit files inside the configured workspace.
+By default, CodexPro runs in handoff mode. ChatGPT can save prompt/handoff files and export context, while generic source `write`/`edit` tools are not advertised in the standard tool surface. If you explicitly enable workspace write mode, ChatGPT can write and exact-edit files inside the configured workspace.
 
 Safety defaults block common sensitive paths:
 
@@ -111,7 +112,7 @@ Safety defaults block common sensitive paths:
 - symlink escapes
 - paths outside the workspace
 
-Use handoff mode if you want ChatGPT to write a plan only and let Codex execute locally.
+Use handoff mode if you want ChatGPT to write a plan only and let Codex execute locally. For inspection, start with `search` or `source_outline`, then use `read_source_lines` for small bounded ranges.
 
 ## Which tunnel should I choose?
 

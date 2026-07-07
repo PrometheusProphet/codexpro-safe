@@ -1,10 +1,11 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { CodexProConfig } from "./config.js";
 import { WorkspaceManager, PathGuard, CodexProError, type Workspace } from "./guard.js";
-import { repoTree, readTextFile, writeTextFile, editTextFile, ensureAiBridge } from "./fsOps.js";
+import { repoTree, readTextFile, writeTextFile, editTextFile, ensureAiBridge, sourceOutline, readSourceLines } from "./fsOps.js";
 import { searchWorkspace } from "./searchOps.js";
 import { runBash } from "./bashOps.js";
 import { gitDiff, gitLog, gitStatus } from "./gitOps.js";
@@ -63,9 +64,100 @@ function toolCallLoggingEnabled(): boolean {
   return process.env.CODEXPRO_LOG_TOOL_CALLS === "1" || process.env.CODEXPRO_LOG_REQUESTS === "1";
 }
 
+function detailedToolCallLoggingEnabled(): boolean {
+  return process.env.CODEXPRO_LOG_TOOL_CALL_DETAILS === "1";
+}
+
 function logToolCall(name: string, status: "ok" | "error", started: number): void {
   if (!toolCallLoggingEnabled()) return;
   console.error(`[CodexProTool] ${name} ${status} ${Date.now() - started}ms`);
+}
+
+function hashForLog(value: unknown): string | undefined {
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+function extensionForLog(value: unknown): string | undefined {
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+  return path.extname(text).toLowerCase() || "(none)";
+}
+
+function textByteCount(result: any): number {
+  const content = Array.isArray(result?.content) ? result.content : [];
+  return content.reduce((total: number, part: any) => {
+    if (part?.type !== "text" || typeof part.text !== "string") return total;
+    return total + Buffer.byteLength(part.text, "utf8");
+  }, 0);
+}
+
+function attachCorrelationId(result: any, correlationId: string): any {
+  if (!result || typeof result !== "object") return result;
+  const structured =
+    result.structuredContent && typeof result.structuredContent === "object" && !Array.isArray(result.structuredContent)
+      ? result.structuredContent
+      : {};
+  result.structuredContent = { ...structured, correlation_id: correlationId };
+  return result;
+}
+
+function sanitizedCallDetails(
+  config: CodexProConfig,
+  name: string,
+  args: any,
+  result: any,
+  status: "ok" | "error",
+  started: number,
+  correlationId: string
+): Record<string, unknown> {
+  const structured = result?.structuredContent && typeof result.structuredContent === "object" ? result.structuredContent : {};
+  const primaryPath = args?.path ?? args?.target_path ?? args?.filename;
+  const rootHash = args?.root || args?.path ? hashForLog(args.root ?? args.path) : undefined;
+  const redactionCount =
+    typeof structured.redaction_count === "number"
+      ? structured.redaction_count
+      : typeof structured.redactionCount === "number"
+        ? structured.redactionCount
+        : undefined;
+  return {
+    timestamp: new Date().toISOString(),
+    correlation_id: correlationId,
+    tool: name,
+    status,
+    duration_ms: Date.now() - started,
+    workspace_id: typeof structured.workspace_id === "string" ? structured.workspace_id : typeof args?.workspace_id === "string" ? args.workspace_id : undefined,
+    workspace_hash: typeof structured.workspace_id === "string" || typeof args?.workspace_id === "string" ? undefined : hashForLog(config.defaultRoot),
+    supplied_root_hash: args?.root ? rootHash : undefined,
+    path_hash: primaryPath ? hashForLog(primaryPath) : undefined,
+    path_extension: primaryPath ? extensionForLog(primaryPath) : undefined,
+    selected_path_count: Array.isArray(args?.selected_paths) ? args.selected_paths.length : undefined,
+    start_line: typeof args?.start_line === "number" ? args.start_line : undefined,
+    end_line: typeof args?.end_line === "number" ? args.end_line : undefined,
+    result_text_bytes: textByteCount(result),
+    result_structured_bytes: Buffer.byteLength(JSON.stringify(redactStructured(structured)), "utf8"),
+    redaction_count: redactionCount,
+    mode: {
+      toolMode: config.toolMode,
+      writeMode: config.writeMode,
+      bashMode: config.bashMode
+    },
+    server_completed: true
+  };
+}
+
+function logDetailedToolCall(
+  config: CodexProConfig,
+  name: string,
+  args: any,
+  result: any,
+  status: "ok" | "error",
+  started: number,
+  correlationId: string
+): void {
+  if (!detailedToolCallLoggingEnabled()) return;
+  console.error(`[CodexProToolDetail] ${JSON.stringify(sanitizedCallDetails(config, name, args, result, status, started, correlationId))}`);
 }
 
 function registerToolCardResource(server: McpServer, config: CodexProConfig): void {
@@ -129,6 +221,7 @@ function assertWriteToolAllowed(config: CodexProConfig, relPath: string): void {
 }
 
 function registerToolCompat(
+  config: CodexProConfig,
   server: McpServer,
   name: string,
   options: Record<string, unknown>,
@@ -136,13 +229,16 @@ function registerToolCompat(
 ): void {
   const wrapped = async (args: any) => {
     const started = Date.now();
+    const correlationId = randomUUID();
     try {
-      const result = tagToolResult(await handler(args ?? {}), name, options);
+      const result = attachCorrelationId(tagToolResult(await handler(args ?? {}), name, options), correlationId);
       logToolCall(name, result?.isError ? "error" : "ok", started);
+      logDetailedToolCall(config, name, args ?? {}, result, result?.isError ? "error" : "ok", started, correlationId);
       return result;
     } catch (error) {
-      const result = tagToolResult(errorResult(error), name, options);
+      const result = attachCorrelationId(tagToolResult(errorResult(error), name, options), correlationId);
       logToolCall(name, "error", started);
+      logDetailedToolCall(config, name, args ?? {}, result, "error", started, correlationId);
       return result;
     }
   };
@@ -176,10 +272,8 @@ const MINIMAL_TOOL_NAMES = [
   "codexpro_self_test",
   "open_current_workspace",
   "open_workspace",
-  "read",
-  "write",
-  "edit",
-  "bash",
+  "source_outline",
+  "read_source_lines",
   "show_changes"
 ] as const;
 
@@ -205,6 +299,8 @@ const FULL_TOOL_NAMES = [
   "workspace_snapshot",
   "tree",
   "search",
+  "source_outline",
+  "read_source_lines",
   "read",
   "write",
   "edit",
@@ -220,19 +316,73 @@ const FULL_TOOL_NAMES = [
   "handoff_to_codex"
 ] as const;
 
-function toolNamesForMode(config: CodexProConfig): string[] {
-  if (config.toolMode === "full") return [...FULL_TOOL_NAMES];
-  if (config.toolMode === "minimal") return [...MINIMAL_TOOL_NAMES];
-  return [...STANDARD_TOOL_NAMES];
+const ADVANCED_STANDARD_TOOL_NAMES = ["read", "write", "edit", "bash"] as const;
+
+interface HiddenTool {
+  name: string;
+  reason: string;
 }
 
-const MINIMAL_TOOLS = new Set<string>(MINIMAL_TOOL_NAMES);
-const STANDARD_TOOLS = new Set<string>(STANDARD_TOOL_NAMES);
+interface ToolExposure {
+  effectiveTools: string[];
+  hiddenTools: HiddenTool[];
+}
+
+function toolNamesForMode(config: CodexProConfig): string[] {
+  return toolExposureForMode(config).effectiveTools;
+}
+
+function uniqueToolNames(names: readonly string[]): string[] {
+  return [...new Set(names)];
+}
+
+function toolExposureForMode(config: CodexProConfig): ToolExposure {
+  if (config.toolMode === "full") return { effectiveTools: uniqueToolNames(FULL_TOOL_NAMES), hiddenTools: [] };
+
+  const base = config.toolMode === "minimal" ? [...MINIMAL_TOOL_NAMES] : [...STANDARD_TOOL_NAMES];
+  const effective = new Set<string>(base);
+  const hiddenTools: HiddenTool[] = [];
+
+  hiddenTools.push({
+    name: "read",
+    reason: "hidden in minimal/standard modes because source_outline and read_source_lines are the safer bounded source-inspection path"
+  });
+
+  if (config.bashMode === "off") {
+    hiddenTools.push({ name: "bash", reason: "hidden because bashMode=off" });
+  } else {
+    effective.add("bash");
+  }
+
+  if (config.writeMode === "workspace") {
+    effective.add("write");
+    effective.add("edit");
+  } else {
+    hiddenTools.push({
+      name: "write",
+      reason: `hidden because writeMode=${config.writeMode}; use save_prompt_file, handoff_to_agent, or export_pro_context`
+    });
+    hiddenTools.push({
+      name: "edit",
+      reason: `hidden because writeMode=${config.writeMode}; use save_prompt_file, handoff_to_agent, or export_pro_context`
+    });
+  }
+
+  for (const name of ADVANCED_STANDARD_TOOL_NAMES) {
+    if (!effective.has(name) && !hiddenTools.some((item) => item.name === name)) {
+      hiddenTools.push({ name, reason: "hidden by current tool mode" });
+    }
+  }
+
+  return {
+    effectiveTools: uniqueToolNames([...effective]),
+    hiddenTools
+  };
+}
 
 function shouldRegisterTool(config: CodexProConfig, name: string): boolean {
   if (config.toolMode === "full") return true;
-  if (config.toolMode === "minimal") return MINIMAL_TOOLS.has(name);
-  return STANDARD_TOOLS.has(name);
+  return toolExposureForMode(config).effectiveTools.includes(name);
 }
 
 function registerCodexTool(
@@ -243,7 +393,7 @@ function registerCodexTool(
   handler: (args: any) => Promise<any> | any
 ): void {
   if (!shouldRegisterTool(config, name)) return;
-  registerToolCompat(server, name, options, handler);
+  registerToolCompat(config, server, name, options, handler);
 }
 
 function serverInstructions(config: CodexProConfig): string {
@@ -253,8 +403,8 @@ function serverInstructions(config: CodexProConfig): string {
     "Preferred workflow:",
     "1. Start with open_current_workspace. Use open_workspace only when the user gives a different root or asks to switch folders.",
     "2. Follow any AGENTS.md-style instructions returned by the workspace open call before editing files.",
-    "3. Inspect with tree, search, and read. Do not use bash for git status, git diff, cat, sed, grep, rg, find, ls, or file reading.",
-    "4. Edit with write/edit. After edits, call show_changes once for git status, diff stats, and review diff.",
+    "3. Inspect with tree, search, source_outline, and small read_source_lines ranges. Generic read is advanced/full-mode compatibility.",
+    "4. Edit with write/edit only when those tools are advertised. In handoff mode, use save_prompt_file, export_pro_context, or handoff_to_agent.",
     "5. Use bash only for meaningful verification commands such as npm test, npm run build, lint, typecheck, or an existing project script.",
     "6. Keep tool calls minimal. Prefer one targeted search plus show_changes instead of repeated broad bash/git calls.",
     "",
@@ -498,6 +648,31 @@ const LOCAL_WRITE_ANNOTATIONS = { readOnlyHint: false, openWorldHint: false, des
 const BASH_ANNOTATIONS = { readOnlyHint: false, openWorldHint: true, destructiveHint: true, idempotentHint: false };
 const HANDOFF_WRITE_ANNOTATIONS = { readOnlyHint: false, openWorldHint: false, destructiveHint: false, idempotentHint: false };
 
+function annotationsForTool(name: string): Record<string, boolean> {
+  if (name === "bash") return BASH_ANNOTATIONS;
+  if (name === "write" || name === "edit") return LOCAL_WRITE_ANNOTATIONS;
+  if (name === "save_prompt_file" || name === "export_pro_context" || name === "handoff_to_agent" || name === "handoff_to_codex" || name === "codexpro_self_test") {
+    return HANDOFF_WRITE_ANNOTATIONS;
+  }
+  if (name === "open_current_workspace" || name === "open_workspace") return SESSION_READ_ANNOTATIONS;
+  return READ_ONLY_ANNOTATIONS;
+}
+
+function annotationSummary(toolNames: string[]): Record<string, unknown> {
+  const counts = { read_only: 0, local_write: 0, handoff_write: 0, open_world: 0, destructive: 0 };
+  const byTool: Record<string, Record<string, boolean>> = {};
+  for (const name of toolNames) {
+    const annotations = annotationsForTool(name);
+    byTool[name] = annotations;
+    if (annotations.readOnlyHint) counts.read_only += 1;
+    else if (annotations.destructiveHint) counts.local_write += 1;
+    else counts.handoff_write += 1;
+    if (annotations.openWorldHint) counts.open_world += 1;
+    if (annotations.destructiveHint) counts.destructive += 1;
+  }
+  return { counts, by_tool: byTool };
+}
+
 const workspaceManagers = new Map<string, WorkspaceManager>();
 
 function workspaceManagerKey(config: CodexProConfig): string {
@@ -539,6 +714,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       }
     },
     async () => {
+      const exposure = toolExposureForMode(config);
       const safeConfig = {
         defaultRoot: config.defaultRoot,
         allowedRoots: config.allowedRoots,
@@ -560,7 +736,38 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         maxWriteBytes: config.maxWriteBytes,
         maxOutputBytes: config.maxOutputBytes,
         maxSearchResults: config.maxSearchResults,
-        blockedGlobs: config.blockedGlobs
+        blockedGlobs: config.blockedGlobs,
+        effectiveTools: exposure.effectiveTools,
+        effectiveToolCount: exposure.effectiveTools.length,
+        hiddenTools: exposure.hiddenTools,
+        annotationSummary: annotationSummary(exposure.effectiveTools),
+        sourceInspection: {
+          preferredWorkflow: ["search", "source_outline", "read_source_lines"],
+          genericRead: config.toolMode === "full" ? "advertised in full mode" : "hidden in minimal/standard mode",
+          readSourceLinesDefaultMaxLines: 80,
+          readSourceLinesMaxLines: 250,
+          readSourceLinesDefaultMaxBytes: Math.min(config.maxReadBytes, 80_000),
+          sourceOutlineMaxBytes: config.maxReadBytes
+        },
+        redaction: {
+          enabled: true,
+          covers: [
+            "OpenAI-style sk- values",
+            "secret-like assignments",
+            "Authorization bearer-style headers",
+            "JWT-like values",
+            "PEM private key blocks",
+            "long base64/base64url-like blobs",
+            "secret URL query params",
+            "credentialed URLs"
+          ],
+          placeholdersAllowed: true
+        },
+        logging: {
+          toolCalls: toolCallLoggingEnabled(),
+          toolCallDetails: detailedToolCallLoggingEnabled(),
+          sanitizedDetailsOnly: true
+        }
       };
       return textResult(`# CodexPro Server Config\n\n${JSON.stringify(safeConfig, null, 2)}`, safeConfig);
     }
@@ -592,6 +799,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     async (args) => {
       const workspace = workspaces.getWorkspace(args.workspace_id);
       const started = Date.now();
+      const exposure = toolExposureForMode(config);
       const checks: Array<{ name: string; status: "pass" | "warn" | "fail"; detail: string }> = [];
       const filesTouched: string[] = [];
       const probePath = `${config.contextDir}/codexpro-self-test.md`;
@@ -601,7 +809,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       };
 
       check("workspace", "pass", workspace.root);
-      check("tool mode", config.toolMode === "full" ? "pass" : "warn", `${config.toolMode}; expected tools: ${toolNamesForMode(config).length}`);
+      check("tool mode", config.toolMode === "full" ? "pass" : "warn", `${config.toolMode}; effective tools: ${exposure.effectiveTools.length}`);
       check("write mode", config.writeMode === "off" ? "warn" : "pass", config.writeMode);
       check("bash mode", config.bashMode === "full" ? "warn" : "pass", config.bashMode);
       check(
@@ -609,7 +817,10 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         config.requireHttpToken && !config.authToken ? "fail" : "pass",
         config.requireHttpToken ? "token required for public/non-loopback access" : "loopback token not required"
       );
-      check("registered tool set", "pass", `${toolNamesForMode(config).length} tools for ${config.toolMode} mode`);
+      check("registered tool set", "pass", `${exposure.effectiveTools.length} effective tools for ${config.toolMode} mode`);
+      if (exposure.hiddenTools.length) {
+        check("hidden tool set", "pass", exposure.hiddenTools.map((item) => `${item.name}: ${item.reason}`).join("; "));
+      }
 
       try {
         const inventory = await codexproInventory(config, workspace, {
@@ -734,7 +945,8 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         `Status: ${status}`,
         `Workspace: ${workspace.root}`,
         `Mode: tools=${config.toolMode}, write=${config.writeMode}, bash=${config.bashMode}`,
-        `Expected tools: ${toolNamesForMode(config).length}`,
+        `Effective tools: ${exposure.effectiveTools.length}`,
+        `Hidden tools: ${exposure.hiddenTools.length}`,
         `Duration: ${Date.now() - started} ms`,
         "",
         "## Checks",
@@ -754,8 +966,11 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         warned,
         failed,
         duration_ms: Date.now() - started,
-        expected_tools: toolNamesForMode(config),
-        expected_tool_count: toolNamesForMode(config).length,
+        expected_tools: exposure.effectiveTools,
+        expected_tool_count: exposure.effectiveTools.length,
+        effective_tools: exposure.effectiveTools,
+        hidden_tools: exposure.hiddenTools,
+        annotation_summary: annotationSummary(exposure.effectiveTools),
         bash_mode: config.bashMode,
         write_mode: config.writeMode,
         tool_mode: config.toolMode,
@@ -1111,6 +1326,150 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
   registerCodexTool(
     config,
     server,
+    "source_outline",
+    {
+      title: "Source Outline",
+      description:
+        "Inspect one workspace-relative source file without returning full raw contents. Returns metadata, imports/exports, top-level symbols, and optional bounded query line anchors.",
+      inputSchema: {
+        workspace_id: z.string().optional().describe("Workspace id from open_workspace. Omit to use default workspace."),
+        path: z.string().describe("Source file path relative to workspace root."),
+        query: z.string().optional().describe("Optional literal text to locate. Returns bounded redacted line previews, not the full file."),
+        max_matches: z.number().int().min(0).max(100).optional().describe("Maximum query matches to return. Default: 20."),
+        max_bytes: z.number().int().min(1000).max(2000000).optional().describe("Maximum file bytes to inspect. Capped by server config.")
+      },
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: {
+        ...toolCardMeta(config),
+        "openai/toolInvocation/invoking": "Outlining source file...",
+        "openai/toolInvocation/invoked": "Source outline ready"
+      }
+    },
+    async (args) => {
+      const workspace = workspaces.getWorkspace(args.workspace_id);
+      const result = await sourceOutline(config, guard, workspace, args.path, {
+        query: args.query,
+        maxMatches: args.max_matches,
+        maxBytes: args.max_bytes
+      });
+      const importsText = result.imports.length ? result.imports.map((item) => `- ${item}`).join("\n") : "- None detected.";
+      const exportsText = result.exports.length ? result.exports.map((item) => `- ${item}`).join("\n") : "- None detected.";
+      const symbolsText = result.symbols.length
+        ? result.symbols.map((item) => `- L${item.line} ${item.exported ? "exported " : ""}${item.kind} ${item.name}`).join("\n")
+        : "- None detected.";
+      const matchesText = result.query
+        ? result.matches.length
+          ? result.matches.map((item) => `- L${item.line}: ${item.preview}`).join("\n")
+          : "- No matches."
+        : "- No query supplied.";
+      const text = [
+        "# Source Outline",
+        "",
+        `Path: ${result.path}`,
+        `Extension: ${result.extension}`,
+        `Bytes: ${result.bytes}`,
+        `Total lines: ${result.totalLines}`,
+        `SHA-256: ${result.sha256}`,
+        `Redactions in previews: ${result.redactionCount}`,
+        "",
+        "## Imports",
+        "",
+        importsText,
+        "",
+        "## Exports",
+        "",
+        exportsText,
+        "",
+        "## Top-Level Symbols",
+        "",
+        symbolsText,
+        "",
+        "## Query Matches",
+        "",
+        matchesText
+      ].join("\n");
+      return textResult(text, {
+        workspace_id: workspace.id,
+        root: workspace.root,
+        path: result.path,
+        extension: result.extension,
+        bytes: result.bytes,
+        total_lines: result.totalLines,
+        sha256: result.sha256,
+        imports: result.imports,
+        exports: result.exports,
+        symbols: result.symbols,
+        matches: result.matches,
+        query: result.query,
+        redaction_count: result.redactionCount,
+        truncated: result.truncated
+      });
+    }
+  );
+
+  registerCodexTool(
+    config,
+    server,
+    "read_source_lines",
+    {
+      title: "Read Source Lines",
+      description:
+        "Read a small bounded line range from a workspace-relative text source file. Prefer source_outline first; this tool returns line-numbered redacted text without Markdown code fences.",
+      inputSchema: {
+        workspace_id: z.string().optional().describe("Workspace id from open_workspace. Omit to use default workspace."),
+        path: z.string().describe("Source file path relative to workspace root."),
+        start_line: z.number().int().min(1).optional().describe("First line to read. Default: 1."),
+        end_line: z.number().int().min(1).optional().describe("Last line to read. Capped by max_lines."),
+        max_lines: z.number().int().min(1).max(250).optional().describe("Maximum lines to return. Default: 80."),
+        max_bytes: z.number().int().min(1000).max(2000000).optional().describe("Maximum file bytes to inspect. Default: 80000, capped by server config.")
+      },
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: {
+        ...toolCardMeta(config),
+        "openai/toolInvocation/invoking": "Reading source lines...",
+        "openai/toolInvocation/invoked": "Source lines read"
+      }
+    },
+    async (args) => {
+      const workspace = workspaces.getWorkspace(args.workspace_id);
+      const result = await readSourceLines(config, guard, workspace, args.path, {
+        startLine: args.start_line,
+        endLine: args.end_line,
+        maxLines: args.max_lines,
+        maxBytes: args.max_bytes
+      });
+      const text = [
+        "# Read Source Lines",
+        "",
+        `Path: ${result.path}`,
+        `Lines: ${result.startLine}-${result.endLine} of ${result.totalLines}`,
+        `File bytes: ${result.bytes}`,
+        `Output bytes: ${result.outputBytes}`,
+        `SHA-256: ${result.sha256}`,
+        `Redactions: ${result.redactionCount}`,
+        "",
+        result.text
+      ].join("\n");
+      return textResult(text, {
+        workspace_id: workspace.id,
+        root: workspace.root,
+        path: result.path,
+        start_line: result.startLine,
+        end_line: result.endLine,
+        total_lines: result.totalLines,
+        bytes: result.bytes,
+        output_bytes: result.outputBytes,
+        sha256: result.sha256,
+        truncated: result.truncated,
+        redaction_count: result.redactionCount,
+        text: result.text
+      });
+    }
+  );
+
+  registerCodexTool(
+    config,
+    server,
     "read",
     {
       title: "Read File",
@@ -1228,7 +1587,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         existed: result.existed,
         additions: result.additions,
         deletions: result.deletions,
-        diff: result.diff
+        changed: result.changed
       });
     }
   );

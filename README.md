@@ -127,16 +127,16 @@ Standard mode exposes:
 - `open_workspace` — open a local project directory using `root` or `path` and return workspace id, git status, AGENTS.md status, optional skill discovery, and optional file tree.
 - `tree` — inspect files.
 - `search` — search code with ripgrep or a Node fallback.
+- `source_outline` — inspect one source file's metadata, imports/exports, top-level symbols, and optional query anchors without returning the full file.
+- `read_source_lines` — read a small bounded, line-numbered source range without Markdown code fences.
 - `load_skill` — load bounded `SKILL.md` instructions for a discovered workspace, user, or plugin skill by name, with optional source/path disambiguation.
-- `read` — read text files with line numbers.
-- `write` — create/overwrite files and return a diff. Controlled by `CODEXPRO_WRITE_MODE`.
-- `edit` — exact text replacement and return a diff. Controlled by `CODEXPRO_WRITE_MODE`.
-- `bash` — run allowlisted shell commands in the workspace. Controlled by `CODEXPRO_BASH_MODE`.
 - `show_changes` — one review-oriented summary with git status, diff stats, and optional diff.
 - `read_handoff` — read `.ai-bridge` files.
 - `save_prompt_file` — save generated Codex prompts as Markdown/text in fixed prompt-only directories; works in handoff mode without enabling source writes.
 - `export_pro_context` — write `.ai-bridge/pro-context.md` for models that cannot call MCP tools directly.
 - `handoff_to_agent` — write `.ai-bridge/current-plan.md` for Codex, OpenCode, Pi, or a custom local implementation agent without executing local commands.
+
+`read`, `write`, `edit`, and `bash` are compatibility/advanced tools. In minimal and standard mode, CodexPro advertises them only when the current safety modes make them appropriate: `bash` is hidden when bash mode is off, and generic `write`/`edit` are hidden unless workspace writes are explicitly enabled. Full mode exposes the advanced catalog for trusted debugging and compatibility.
 
 Minimal mode exposes only:
 
@@ -144,8 +144,7 @@ Minimal mode exposes only:
 server_config
 codexpro_self_test
 open_current_workspace / open_workspace
-read / write / edit
-bash
+source_outline / read_source_lines
 show_changes
 ```
 
@@ -597,7 +596,7 @@ To explicitly install `cloudflared` for public tunnel use:
 codexpro install-cloudflared
 ```
 
-Request logs print method, path, status, and duration. CodexPro also logs tool name, success/error state, and duration as `[CodexProTool] ...` lines. Query strings, file contents, and prompts are not logged, so query-token compatibility mode and source content are not printed.
+Request logs print method, path, status, and duration. CodexPro also logs tool name, success/error state, and duration as `[CodexProTool] ...` lines. Query strings, file contents, and prompts are not logged, so query-token compatibility mode and source content are not printed. For false-positive investigation, `CODEXPRO_LOG_TOOL_CALL_DETAILS=1` adds local-only sanitized tool-call lines with correlation ids, path hashes/extensions, line ranges, byte counts, redaction counts when available, and mode summaries. If a ChatGPT-side block happens and no matching local correlation log appears, the block likely happened before the server received the call.
 
 For faster ChatGPT runs, keep the first call narrow:
 
@@ -607,7 +606,7 @@ Use tree with max_depth=2 and max_entries=100 when you need file structure.
 Use load_skill only for the specific discovered skill needed for the task.
 Use --tool-mode full and call codexpro_inventory only when you want ChatGPT to see full global skill and MCP server inventory.
 Do not call open_workspace after open_current_workspace unless you are switching to a different root.
-Use tree/search/read for inspection, one targeted search plus show_changes for review, and bash only for focused build/test/lint verification.
+Use search/source_outline first, read_source_lines only for small bounded ranges, one targeted search plus show_changes for review, and bash only for focused build/test/lint verification.
 ```
 
 `open_current_workspace` and `open_workspace` discover workspace, user, and plugin skills by default. Use `include_global_skills=false` when you only want repo-local instructions, or `include_skills=false` when you want the fastest possible open call. `load_skill` only accepts a discovered skill name plus optional source and exact displayed path, then reads that skill's `SKILL.md` with a bounded byte limit; it does not accept arbitrary file paths. If multiple discovered skills still match, CodexPro returns an ambiguity error instead of guessing. `workspace_snapshot` stays narrower by default for speed. In `--tool-mode full`, use `codexpro_inventory` for global/user/plugin skills and MCP server names. `codexpro_inventory` reports names/descriptions and sanitized paths only; it does not expose MCP command arguments or environment values.
@@ -1011,15 +1010,15 @@ workspace  write/edit can write workspace files, except blocked paths
 
 The launcher uses `handoff` unless you explicitly pass `--write workspace`.
 
-`save_prompt_file` is the narrow exception for prompt handoff and coordination. In standard and full tool modes it can save generated prompts only as `.md` or `.txt` files under fixed prompt-only targets: `.ai-bridge/prompts/`, `docs/chatgpt/generated-prompts/`, or `docs/loop/inbox/`. It does not accept arbitrary directories, does not execute commands, and does not allow generic source editing. Use `workspace` write mode only for trusted direct source edits.
+`save_prompt_file` is the narrow exception for prompt handoff and coordination. In standard and full tool modes it can save generated prompts only as `.md` or `.txt` files under fixed prompt-only targets: `.ai-bridge/prompts/`, `docs/chatgpt/generated-prompts/`, or `docs/loop/inbox/`. It returns safe metadata and diff stats, not the prompt body or full diff. It does not accept arbitrary directories, does not execute commands, and does not allow generic source editing. Use `workspace` write mode only for trusted direct source edits.
 
 ## Tool modes
 
-`CODEXPRO_TOOL_MODE=standard` is the default. It exposes the normal coding loop plus `show_changes`, Pro context export, and generic agent handoff.
+`CODEXPRO_TOOL_MODE=standard` is the default. It exposes the normal coding loop plus bounded source inspection, `show_changes`, Pro context export, prompt saves, and generic agent handoff. Generic read/write/edit/bash are mode-dependent or full-mode compatibility tools.
 
 ```text
-minimal   smallest surface for demos and simple coding: open/read/write/edit/bash/show_changes
-standard  default surface for local coding plus handoff/export
+minimal   smallest surface for demos and simple coding: open/source_outline/read_source_lines/show_changes
+standard  default surface for local coding plus bounded source inspection and handoff/export
 full      all tools, including inventory, workspace snapshots, raw git tools, codex_context, and compatibility wrappers
 ```
 

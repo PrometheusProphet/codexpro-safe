@@ -19,10 +19,14 @@ class McpStdioClient {
   constructor(command, args, options) {
     this.child = spawn(command, args, options);
     this.buffer = '';
+    this.stderr = '';
     this.nextId = 1;
     this.pending = new Map();
     this.child.stdout.on('data', (chunk) => this.onData(String(chunk)));
-    this.child.stderr.on('data', (chunk) => process.stderr.write(chunk));
+    this.child.stderr.on('data', (chunk) => {
+      this.stderr += String(chunk);
+      process.stderr.write(chunk);
+    });
     this.child.on('exit', (code) => {
       for (const { reject } of this.pending.values()) reject(new Error(`server exited ${code}`));
     });
@@ -141,7 +145,7 @@ await client.request('initialize', {
 client.notify('notifications/initialized');
 const tools = await client.request('tools/list', {});
 const toolNames = tools.tools.map((tool) => tool.name);
-for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'list_workspaces', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'tree', 'search', 'load_skill', 'read', 'write', 'edit', 'bash', 'git_status', 'git_diff', 'show_changes', 'read_handoff', 'codex_context', 'save_prompt_file', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {
+for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'list_workspaces', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'tree', 'search', 'source_outline', 'read_source_lines', 'load_skill', 'read', 'write', 'edit', 'bash', 'git_status', 'git_diff', 'show_changes', 'read_handoff', 'codex_context', 'save_prompt_file', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {
   if (!toolNames.includes(expected)) throw new Error(`missing tool: ${expected}`);
 }
 const toolCardUri = 'ui://widget/codexpro-tool-card-v9.html';
@@ -190,6 +194,12 @@ if (configResult.structuredContent.codexpro_tool !== 'server_config') {
 }
 if (configResult.structuredContent.toolCardMode !== 'off') {
   throw new Error(`server_config did not expose default toolCardMode=off: ${configResult.structuredContent.toolCardMode}`);
+}
+if (!configResult.structuredContent.effectiveTools?.includes?.('source_outline') || !configResult.structuredContent.effectiveTools?.includes?.('read_source_lines')) {
+  throw new Error(`server_config did not expose effective safe source tools: ${JSON.stringify(configResult.structuredContent.effectiveTools)}`);
+}
+if (!configResult.structuredContent.annotationSummary?.counts || !configResult.structuredContent.redaction?.enabled || !configResult.structuredContent.sourceInspection?.preferredWorkflow?.includes?.('source_outline')) {
+  throw new Error('server_config did not expose safe posture diagnostics');
 }
 await expectToolError('read', { path: '.npmrc' }, /blocked/i);
 
@@ -286,6 +296,18 @@ const ws = opened.structuredContent.workspace_id;
 const openedByPath = await client.request('tools/call', { name: 'open_workspace', arguments: { path: tmp, include_tree: false } });
 if (openedByPath.structuredContent.workspace_id !== ws) {
   throw new Error(`open_workspace path alias returned ${openedByPath.structuredContent.workspace_id}, expected ${ws}`);
+}
+const outline = await client.request('tools/call', { name: 'source_outline', arguments: { workspace_id: ws, path: 'demo.txt', query: 'read' } });
+if (outline.structuredContent.path !== 'demo.txt' || outline.structuredContent.total_lines < 4 || !Array.isArray(outline.structuredContent.matches) || outline.structuredContent.matches.length < 1) {
+  throw new Error(`source_outline did not return bounded source metadata: ${JSON.stringify(outline.structuredContent)}`);
+}
+const sourceLines = await client.request('tools/call', { name: 'read_source_lines', arguments: { workspace_id: ws, path: 'demo.txt', start_line: 2, end_line: 3 } });
+const sourceLinesText = sourceLines.content?.[0]?.text ?? '';
+if (!sourceLinesText.includes('2 | read') || sourceLinesText.includes('```')) {
+  throw new Error(`read_source_lines did not return unfenced bounded line output: ${sourceLinesText}`);
+}
+if (sourceLines.structuredContent.text?.includes?.('```') || sourceLines.structuredContent.start_line !== 2 || sourceLines.structuredContent.end_line !== 3) {
+  throw new Error(`read_source_lines structured result was not bounded as expected: ${JSON.stringify(sourceLines.structuredContent)}`);
 }
 await client.request('tools/call', { name: 'read', arguments: { workspace_id: ws, path: 'demo.txt' } });
 const secretRead = await client.request('tools/call', { name: 'read', arguments: { workspace_id: ws, path: 'config.txt' } });
@@ -429,6 +451,33 @@ await expectToolError('handoff_to_agent', {
   append: true
 }, /File is too large/);
 client.close();
+
+const detailLogClient = new McpStdioClient('node', ['dist/stdio.js', '--root', tmp, '--allow-root', tmp, '--write', 'handoff', '--tool-mode', 'standard'], {
+  cwd: path.resolve('.'),
+  env: {
+    ...process.env,
+    CODEXPRO_ROOT: tmp,
+    CODEXPRO_ALLOWED_ROOTS: tmp,
+    CODEXPRO_LOG_TOOL_CALL_DETAILS: '1'
+  }
+});
+await detailLogClient.request('initialize', {
+  protocolVersion: '2024-11-05',
+  capabilities: {},
+  clientInfo: { name: 'codexpro-detail-log-smoke', version: '0.1.0' }
+});
+detailLogClient.notify('notifications/initialized');
+const detailLogRead = await detailLogClient.request('tools/call', { name: 'read_source_lines', arguments: { path: 'demo.txt', start_line: 1, end_line: 1 } });
+if (!detailLogRead.structuredContent.correlation_id) {
+  throw new Error('read_source_lines did not return a correlation_id');
+}
+if (!detailLogClient.stderr.includes('[CodexProToolDetail]') || !detailLogClient.stderr.includes('correlation_id') || !detailLogClient.stderr.includes('"path_extension":".txt"')) {
+  throw new Error(`detailed tool logging did not emit sanitized metadata:\n${detailLogClient.stderr}`);
+}
+if (detailLogClient.stderr.includes(tmp) || detailLogClient.stderr.includes('demo.txt') || detailLogClient.stderr.includes('alpha')) {
+  throw new Error(`detailed tool logging leaked raw path or source content:\n${detailLogClient.stderr}`);
+}
+detailLogClient.close();
 async function assertToolMode(mode, expected, hidden) {
   const args = ['dist/stdio.js', '--root', tmp, '--allow-root', tmp, '--bash', 'safe'];
   if (mode) args.push('--tool-mode', mode);
@@ -453,8 +502,8 @@ async function assertToolMode(mode, expected, hidden) {
   modeClient.close();
 }
 
-await assertToolMode('', ['server_config', 'codexpro_self_test', 'open_current_workspace', 'open_workspace', 'tree', 'search', 'load_skill', 'read', 'write', 'edit', 'bash', 'show_changes', 'read_handoff', 'save_prompt_file', 'export_pro_context', 'handoff_to_agent'], ['codexpro_inventory', 'workspace_snapshot', 'git_status', 'git_diff', 'codex_context', 'handoff_to_codex']);
-await assertToolMode('minimal', ['server_config', 'codexpro_self_test', 'open_current_workspace', 'open_workspace', 'read', 'write', 'edit', 'bash', 'show_changes'], ['tree', 'search', 'load_skill', 'read_handoff', 'save_prompt_file', 'export_pro_context', 'handoff_to_agent', 'codex_context']);
+await assertToolMode('', ['server_config', 'codexpro_self_test', 'open_current_workspace', 'open_workspace', 'source_outline', 'read_source_lines', 'tree', 'search', 'load_skill', 'bash', 'show_changes', 'read_handoff', 'save_prompt_file', 'export_pro_context', 'handoff_to_agent'], ['codexpro_inventory', 'workspace_snapshot', 'read', 'write', 'edit', 'git_status', 'git_diff', 'codex_context', 'handoff_to_codex']);
+await assertToolMode('minimal', ['server_config', 'codexpro_self_test', 'open_current_workspace', 'open_workspace', 'source_outline', 'read_source_lines', 'bash', 'show_changes'], ['tree', 'search', 'load_skill', 'read', 'write', 'edit', 'read_handoff', 'save_prompt_file', 'export_pro_context', 'handoff_to_agent', 'codex_context']);
 
 function fileForRel(root, relPath) {
   return path.join(root, ...relPath.split('/'));
@@ -480,14 +529,16 @@ await handoffPromptClient.request('initialize', {
   clientInfo: { name: 'codexpro-prompt-file-smoke', version: '0.1.0' }
 });
 handoffPromptClient.notify('notifications/initialized');
+const handoffPromptTools = await handoffPromptClient.request('tools/list', {});
+const handoffPromptToolNames = handoffPromptTools.tools.map((tool) => tool.name);
+for (const expected of ['server_config', 'open_current_workspace', 'source_outline', 'read_source_lines', 'search', 'save_prompt_file', 'export_pro_context', 'handoff_to_agent']) {
+  if (!handoffPromptToolNames.includes(expected)) throw new Error(`standard handoff mode missing ${expected}; got ${handoffPromptToolNames.join(', ')}`);
+}
+for (const hidden of ['bash', 'read', 'write', 'edit']) {
+  if (handoffPromptToolNames.includes(hidden)) throw new Error(`standard handoff mode should hide ${hidden}; got ${handoffPromptToolNames.join(', ')}`);
+}
 const promptOpen = await handoffPromptClient.request('tools/call', { name: 'open_current_workspace', arguments: { include_tree: false } });
 const promptWs = promptOpen.structuredContent.workspace_id;
-await expectToolError(
-  'write',
-  { workspace_id: promptWs, path: 'notes.md', content: 'source write should remain blocked\n' },
-  /handoff|Source writes are disabled|\.ai-bridge/i,
-  handoffPromptClient
-);
 
 const savedPrompt = await handoffPromptClient.request('tools/call', {
   name: 'save_prompt_file',
@@ -499,6 +550,13 @@ const savedPrompt = await handoffPromptClient.request('tools/call', {
   }
 });
 const aiBridgePromptPath = assertSavedUnder(savedPrompt, '.ai-bridge/prompts/');
+const savedPromptPayload = JSON.stringify(savedPrompt.structuredContent);
+if (Object.hasOwn(savedPrompt.structuredContent, 'diff') || savedPromptPayload.includes('Implement the smoke prompt file check.') || savedPromptPayload.includes('Paste this into Codex')) {
+  throw new Error(`save_prompt_file exposed prompt body or raw diff in structuredContent: ${savedPromptPayload}`);
+}
+if (typeof savedPrompt.structuredContent.changed !== 'boolean') {
+  throw new Error(`save_prompt_file did not return changed metadata: ${savedPromptPayload}`);
+}
 const aiBridgePromptText = await fs.readFile(fileForRel(promptRoot, aiBridgePromptPath), 'utf8');
 if (!aiBridgePromptText.includes('Implement the smoke prompt file check.')) {
   throw new Error('saved ai_bridge prompt did not contain supplied prompt text');
@@ -587,6 +645,25 @@ if (!envRefPromptText.includes('process.env.OPENAI_API_KEY')) {
   throw new Error('env-var reference prompt was not saved');
 }
 handoffPromptClient.close();
+
+const handoffFullClient = new McpStdioClient('node', ['dist/stdio.js', '--root', promptRoot, '--allow-root', promptRoot, '--write', 'handoff', '--tool-mode', 'full'], {
+  cwd: path.resolve('.'),
+  env: { ...process.env, CODEXPRO_ROOT: promptRoot, CODEXPRO_ALLOWED_ROOTS: promptRoot }
+});
+await handoffFullClient.request('initialize', {
+  protocolVersion: '2024-11-05',
+  capabilities: {},
+  clientInfo: { name: 'codexpro-full-handoff-enforcement-smoke', version: '0.1.0' }
+});
+handoffFullClient.notify('notifications/initialized');
+const fullHandoffOpen = await handoffFullClient.request('tools/call', { name: 'open_current_workspace', arguments: { include_tree: false } });
+await expectToolError(
+  'write',
+  { workspace_id: fullHandoffOpen.structuredContent.workspace_id, path: 'notes.md', content: 'source write should remain blocked\n' },
+  /handoff|Source writes are disabled|\.ai-bridge/i,
+  handoffFullClient
+);
+handoffFullClient.close();
 
 const nonGitRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-non-git-'));
 await fs.writeFile(path.join(nonGitRoot, 'README.md'), '# Non-git fixture\n', 'utf8');

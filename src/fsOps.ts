@@ -6,7 +6,7 @@ import { minimatch } from "minimatch";
 import type { CodexProConfig } from "./config.js";
 import type { Workspace } from "./guard.js";
 import { CodexProError, displayPath, normalizeRelPath, PathGuard } from "./guard.js";
-import { hasSecretValue, redactSensitiveText } from "./redact.js";
+import { hasSecretValue, redactSensitiveText, redactSensitiveTextWithCount } from "./redact.js";
 
 export interface TreeOptions {
   path?: string;
@@ -30,6 +30,38 @@ export interface ReadFileResult {
   bytes: number;
   sha256: string;
   truncated: boolean;
+}
+
+export interface SourceOutlineSymbol {
+  name: string;
+  kind: "class" | "component" | "const" | "function" | "interface" | "type";
+  line: number;
+  exported: boolean;
+}
+
+export interface SourceOutlineMatch {
+  line: number;
+  preview: string;
+}
+
+export interface SourceOutlineResult {
+  path: string;
+  extension: string;
+  bytes: number;
+  totalLines: number;
+  sha256: string;
+  imports: string[];
+  exports: string[];
+  symbols: SourceOutlineSymbol[];
+  matches: SourceOutlineMatch[];
+  query?: string;
+  redactionCount: number;
+  truncated: boolean;
+}
+
+export interface SourceLinesResult extends ReadFileResult {
+  redactionCount: number;
+  outputBytes: number;
 }
 
 export interface DiffResult {
@@ -226,6 +258,135 @@ export async function readTextFile(
     bytes: buffer.byteLength,
     sha256: sha256(text),
     truncated
+  };
+}
+
+function sourceLinePreview(line: string): string {
+  const trimmed = line.trim().replace(/\s+/g, " ");
+  return trimmed.length > 180 ? `${trimmed.slice(0, 180)}...` : trimmed;
+}
+
+function importSpecifier(line: string): string | undefined {
+  const fromMatch = line.match(/^\s*import(?:\s+type)?[\s\S]*?\sfrom\s+["']([^"']+)["']/);
+  if (fromMatch) return fromMatch[1];
+  const sideEffectMatch = line.match(/^\s*import\s+["']([^"']+)["']/);
+  return sideEffectMatch?.[1];
+}
+
+function exportSummary(line: string): string | undefined {
+  const trimmed = sourceLinePreview(line);
+  if (!/^(?:export\s+)/.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+function sourceSymbol(line: string, lineNumber: number): SourceOutlineSymbol | undefined {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("//")) return undefined;
+  const exported = trimmed.startsWith("export ");
+  const withoutExport = trimmed
+    .replace(/^export\s+default\s+/, "")
+    .replace(/^export\s+/, "")
+    .replace(/^declare\s+/, "")
+    .replace(/^abstract\s+/, "");
+
+  const functionMatch = withoutExport.match(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\b/);
+  if (functionMatch) return { name: functionMatch[1], kind: "function", line: lineNumber, exported };
+
+  const classMatch = withoutExport.match(/^class\s+([A-Za-z_$][\w$]*)\b/);
+  if (classMatch) return { name: classMatch[1], kind: "class", line: lineNumber, exported };
+
+  const interfaceMatch = withoutExport.match(/^interface\s+([A-Za-z_$][\w$]*)\b/);
+  if (interfaceMatch) return { name: interfaceMatch[1], kind: "interface", line: lineNumber, exported };
+
+  const typeMatch = withoutExport.match(/^type\s+([A-Za-z_$][\w$]*)\b/);
+  if (typeMatch) return { name: typeMatch[1], kind: "type", line: lineNumber, exported };
+
+  const constMatch = withoutExport.match(/^(?:const|let|var)\s+([A-Z][A-Za-z0-9_$]*)\s*=/);
+  if (constMatch) {
+    const kind = /(?:=>|React\.memo|forwardRef|memo\()/.test(withoutExport) ? "component" : "const";
+    return { name: constMatch[1], kind, line: lineNumber, exported };
+  }
+
+  return undefined;
+}
+
+export async function sourceOutline(
+  config: CodexProConfig,
+  guard: PathGuard,
+  workspace: Workspace,
+  filePath: string,
+  options: { query?: string; maxMatches?: number; maxBytes?: number } = {}
+): Promise<SourceOutlineResult> {
+  const resolved = guard.resolve(workspace, filePath);
+  const maxBytes = Math.min(options.maxBytes ?? config.maxReadBytes, config.maxReadBytes);
+  await guard.assertTextFile(resolved.absPath, maxBytes);
+  const buffer = await fsp.readFile(resolved.absPath);
+  const text = buffer.toString("utf8");
+  const lines = splitLines(text);
+  const imports: string[] = [];
+  const exports: string[] = [];
+  const symbols: SourceOutlineSymbol[] = [];
+  const matches: SourceOutlineMatch[] = [];
+  let redactionCount = 0;
+  const maxMatches = Math.max(0, Math.min(options.maxMatches ?? 20, 100));
+  const query = options.query?.trim();
+  const lowerQuery = query?.toLowerCase();
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const lineNumber = index + 1;
+    const imported = importSpecifier(line);
+    if (imported) imports.push(imported);
+    const exported = exportSummary(line);
+    if (exported) exports.push(exported);
+    const symbol = sourceSymbol(line, lineNumber);
+    if (symbol) symbols.push(symbol);
+    if (lowerQuery && matches.length < maxMatches && line.toLowerCase().includes(lowerQuery)) {
+      const redacted = redactSensitiveTextWithCount(sourceLinePreview(line));
+      redactionCount += redacted.count;
+      matches.push({ line: lineNumber, preview: redacted.text });
+    }
+  }
+
+  return {
+    path: resolved.relPath,
+    extension: path.extname(resolved.relPath).toLowerCase() || "(none)",
+    bytes: buffer.byteLength,
+    totalLines: lines.length,
+    sha256: sha256(text),
+    imports: [...new Set(imports)].slice(0, 80),
+    exports: exports.slice(0, 80),
+    symbols: symbols.slice(0, 120),
+    matches,
+    query: query || undefined,
+    redactionCount,
+    truncated: imports.length > 80 || exports.length > 80 || symbols.length > 120 || matches.length >= maxMatches
+  };
+}
+
+export async function readSourceLines(
+  config: CodexProConfig,
+  guard: PathGuard,
+  workspace: Workspace,
+  filePath: string,
+  options: { startLine?: number; endLine?: number; maxLines?: number; maxBytes?: number } = {}
+): Promise<SourceLinesResult> {
+  const maxLines = Math.max(1, Math.min(Math.floor(options.maxLines ?? 80), 250));
+  const startLine = Math.max(1, Math.floor(options.startLine ?? 1));
+  const requestedEndLine = options.endLine === undefined ? startLine + maxLines - 1 : Math.floor(options.endLine);
+  const boundedEndLine = Math.min(requestedEndLine, startLine + maxLines - 1);
+  const result = await readTextFile(config, guard, workspace, filePath, {
+    startLine,
+    endLine: boundedEndLine,
+    maxBytes: Math.min(options.maxBytes ?? Math.min(config.maxReadBytes, 80_000), config.maxReadBytes)
+  });
+  const redacted = redactSensitiveTextWithCount(result.text);
+  return {
+    ...result,
+    text: redacted.text,
+    truncated: result.truncated || requestedEndLine > boundedEndLine,
+    redactionCount: redacted.count,
+    outputBytes: Buffer.byteLength(redacted.text, "utf8")
   };
 }
 

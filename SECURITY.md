@@ -55,6 +55,10 @@ codexpro start \
   --tunnel none
 ```
 
+In the default standard/handoff posture, the advertised source-inspection path is `search` -> `source_outline` -> small `read_source_lines` ranges. Generic `read` is full-mode compatibility, `bash` is hidden when bash mode is off, and generic `write`/`edit` are hidden unless workspace writes are explicitly enabled. Hidden tools still keep their server-side policy checks if called by a full-mode or stale client.
+
+For local false-positive investigation, `CODEXPRO_LOG_TOOL_CALL_DETAILS=1` writes sanitized correlation logs only. These logs use workspace ids or hashes, path hashes/extensions, line ranges, byte counts, redaction counts when available, and mode summaries. They do not log raw file contents, prompt bodies, auth tokens, query strings, private absolute paths, or raw tool arguments. If no local correlation id appears for a blocked call, the host likely blocked the call before invoking the server.
+
 Explicit source-editing mode for a trusted local repo:
 
 ```bash

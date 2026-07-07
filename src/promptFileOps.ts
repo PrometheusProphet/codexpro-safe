@@ -32,7 +32,7 @@ export interface SavePromptFileResult {
   existed: boolean;
   additions: number;
   deletions: number;
-  diff: string;
+  changed: boolean;
 }
 
 function trimTrailingSlashes(value: string): string {
@@ -129,6 +129,6 @@ export async function savePromptFile(
     existed: result.existed,
     additions: result.diff.additions,
     deletions: result.diff.deletions,
-    diff: result.diff.diff
+    changed: result.diff.changed
   };
 }

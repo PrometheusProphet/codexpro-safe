@@ -61,7 +61,7 @@ Options:
                              handoff = write/edit stay in .ai-bridge; save_prompt_file has fixed prompt dirs.
   --tool-mode <minimal|standard|full>
                              Tool surface exposed to ChatGPT. Default: standard.
-                             minimal = open/read/write/edit/bash/show_changes only.
+                             minimal = open/source_outline/read_source_lines/show_changes only.
                              full = expose every compatibility and advanced tool.
   --tool-card-mode <off|compact>
                              Custom ChatGPT HTML tool cards. Default: off.

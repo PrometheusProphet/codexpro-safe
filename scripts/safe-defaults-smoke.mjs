@@ -45,6 +45,40 @@ await withCleanCodexproEnv(async () => {
   if (!Array.isArray(config.corsOrigins) || config.corsOrigins.length !== 0) fail(`default corsOrigins should be empty, got ${JSON.stringify(config.corsOrigins)}`);
 });
 
+const { redactSensitiveText, redactSensitiveTextWithCount, hasSecretValue } = await import('../dist/redact.js');
+const fakePemPrivateKey = ['-----BEGIN ', 'PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END ', 'PRIVATE KEY-----'].join('');
+const sensitiveSamples = [
+  'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payloadpart.signaturepart',
+  'const jwt = "aaaaaaaaaaaa.bbbbbbbbbbbb.cccccccccccc";',
+  fakePemPrivateKey,
+  'https://user:password@example.test/path',
+  'https://example.test/callback?access_token=abcdefghijklmnopqrstuvwxyz123456&ok=1',
+  'const blob = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";',
+  'SERVICE_TOKEN="abcdefghijklmnopqrstuvwxyz1234567890"'
+];
+for (const sample of sensitiveSamples) {
+  const redacted = redactSensitiveTextWithCount(sample);
+  if (redacted.count < 1 || !redacted.text.includes('[REDACTED_SECRET]')) {
+    fail(`redaction missed sensitive sample: ${sample}`);
+  }
+  if (!hasSecretValue(sample)) fail(`hasSecretValue missed sensitive sample: ${sample}`);
+}
+const placeholderSamples = [
+  'OPENAI_API_KEY=process.env.OPENAI_API_KEY',
+  'TOKEN=import.meta.env.VITE_TOKEN',
+  'password = os.environ["PASSWORD"]',
+  'secret = getenv("SECRET")',
+  'api_key=replace-me',
+  'Authorization: Bearer <token>',
+  'OPENAI_API_KEY=[REDACTED_SECRET]'
+];
+for (const sample of placeholderSamples) {
+  const redacted = redactSensitiveText(sample);
+  if (redacted !== sample || hasSecretValue(sample)) {
+    fail(`redaction should preserve placeholder sample: ${sample} -> ${redacted}`);
+  }
+}
+
 const packageJson = JSON.parse(await readText('package.json'));
 if (packageJson.name !== 'codexpro-safe') fail(`package name should be codexpro-safe, got ${packageJson.name}`);
 if (packageJson.bin?.['codexpro-safe'] !== 'scripts/codexpro.mjs') fail('codexpro-safe primary bin missing');
