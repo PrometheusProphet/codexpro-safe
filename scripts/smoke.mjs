@@ -644,6 +644,119 @@ const envRefPromptText = await fs.readFile(fileForRel(promptRoot, envRefPrompt.s
 if (!envRefPromptText.includes('process.env.OPENAI_API_KEY')) {
   throw new Error('env-var reference prompt was not saved');
 }
+
+await fs.mkdir(path.join(promptRoot, '.codexpro'), { recursive: true });
+await fs.writeFile(
+  path.join(promptRoot, '.codexpro', 'prompt-save-policy.json'),
+  JSON.stringify({
+    schemaVersion: 1,
+    validator: 'product-contract-v1',
+    requireManifest: true
+  }),
+  'utf8'
+);
+const policyMissingPath = path.join(promptRoot, '.ai-bridge', 'prompts', 'policy-missing.md');
+await expectToolError(
+  'save_prompt_file',
+  {
+    workspace_id: promptWs,
+    target: 'ai_bridge',
+    filename: 'policy-missing.md',
+    prompt: 'This prompt must not be saved without a contract manifest.'
+  },
+  /requires contract_manifest/i,
+  handoffPromptClient
+);
+if (await fs.access(policyMissingPath).then(() => true, () => false)) {
+  throw new Error('save_prompt_file wrote policy-missing.md before rejecting the missing manifest');
+}
+
+const policyInvalidPath = path.join(promptRoot, '.ai-bridge', 'prompts', 'policy-invalid.md');
+await expectToolError(
+  'save_prompt_file',
+  {
+    workspace_id: promptWs,
+    target: 'ai_bridge',
+    filename: 'policy-invalid.md',
+    prompt: 'This prompt must not preserve a status-only destination defect.',
+    contract_manifest: {
+      schemaVersion: 1,
+      promptId: 'policy-invalid',
+      profile: 'complex',
+      contractTriggers: ['parity', 'visible-destination-command'],
+      productAuthorityReferences: ['sanitized parity contract'],
+      parentRequirementIds: ['leaf-engagement-detail'],
+      requirements: [{
+        id: 'leaf-engagement-detail',
+        label: 'Explore to Engagement detail',
+        requiredResult: { kind: 'destination', target: 'Engagement detail' },
+        currentResult: { kind: 'status' },
+        proposedResult: { kind: 'status' },
+        disposition: 'preserved',
+        localScope: 'in_scope',
+        parentStatus: 'complete',
+        proof: ['sanitized authority row'],
+        knownDefect: true
+      }],
+      omittedParentRows: []
+    }
+  },
+  /known defect cannot be preserved|preserved requires/i,
+  handoffPromptClient
+);
+if (await fs.access(policyInvalidPath).then(() => true, () => false)) {
+  throw new Error('save_prompt_file wrote policy-invalid.md before rejecting the invalid manifest');
+}
+
+const policyHashMismatchPath = path.join(promptRoot, '.ai-bridge', 'prompts', 'policy-hash-mismatch.md');
+await expectToolError(
+  'save_prompt_file',
+  {
+    workspace_id: promptWs,
+    target: 'ai_bridge',
+    filename: 'policy-hash-mismatch.md',
+    prompt: 'This prompt must match the manifest hash.',
+    contract_manifest: {
+      schemaVersion: 1,
+      promptId: 'policy-hash-mismatch',
+      promptHash: `sha256:${'0'.repeat(64)}`,
+      profile: 'green',
+      contractTriggers: [],
+      productAuthorityReferences: [],
+      parentRequirementIds: [],
+      requirements: [],
+      omittedParentRows: []
+    }
+  },
+  /promptHash does not match/i,
+  handoffPromptClient
+);
+if (await fs.access(policyHashMismatchPath).then(() => true, () => false)) {
+  throw new Error('save_prompt_file wrote policy-hash-mismatch.md before rejecting the mismatched hash');
+}
+
+const policyValidPrompt = await handoffPromptClient.request('tools/call', {
+  name: 'save_prompt_file',
+  arguments: {
+    workspace_id: promptWs,
+    target: 'ai_bridge',
+    filename: 'policy-valid.md',
+    prompt: 'Implement the bounded routine Green repair.',
+    contract_manifest: {
+      schemaVersion: 1,
+      promptId: 'policy-valid-green',
+      profile: 'green',
+      contractTriggers: [],
+      productAuthorityReferences: [],
+      parentRequirementIds: [],
+      requirements: [],
+      omittedParentRows: []
+    }
+  }
+});
+if (policyValidPrompt.structuredContent.validation?.verdict !== 'passed') {
+  throw new Error(`save_prompt_file did not return a passing validation receipt: ${JSON.stringify(policyValidPrompt.structuredContent)}`);
+}
 handoffPromptClient.close();
 
 const handoffFullClient = new McpStdioClient('node', ['dist/stdio.js', '--root', promptRoot, '--allow-root', promptRoot, '--write', 'handoff', '--tool-mode', 'full'], {

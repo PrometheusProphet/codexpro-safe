@@ -1551,12 +1551,13 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     {
       title: "Save Prompt File",
       description:
-        "Save a generated Codex prompt as a Markdown/text file only under .ai-bridge/prompts, docs/chatgpt/generated-prompts, or docs/loop/inbox. Works in handoff write mode, does not enable source writes, and does not execute commands.",
+        "Save a generated Codex prompt as a Markdown/text file only under .ai-bridge/prompts, docs/chatgpt/generated-prompts, or docs/loop/inbox. Workspaces may require a product-contract-v1 manifest before any write. Works in handoff write mode, does not enable source writes, and does not execute commands.",
       inputSchema: {
         workspace_id: z.string().optional().describe("Workspace id from open_workspace. Omit to use default workspace."),
         target: z.enum(["ai_bridge", "chatgpt_generated", "loop_inbox"]).optional().describe("Approved prompt target. Default: ai_bridge."),
         title: z.string().optional().describe("Title used to generate a safe timestamped Markdown filename when filename is omitted."),
         prompt: z.string().describe("Generated Codex prompt content to save."),
+        contract_manifest: z.record(z.unknown()).optional().describe("Structured product-contract-v1 manifest. Required when the workspace prompt-save policy opts in."),
         filename: z.string().optional().describe("Optional basename only, with .md or .txt extension. No directories, hidden names, traversal, or source extensions."),
         overwrite: z.boolean().optional().describe("Allow overwriting an existing prompt file. Default follows the write tool behavior.")
       },
@@ -1573,10 +1574,14 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         target: args.target,
         title: args.title,
         prompt: String(args.prompt ?? ""),
+        contractManifest: args.contract_manifest,
         filename: args.filename,
         overwrite: args.overwrite
       });
-      const text = `# Save Prompt File\n\nSaved: ${result.path}\nTarget: ${result.target}\nExisted before: ${result.existed}\nBytes: ${result.bytes}\nSHA-256: ${result.sha256}\nDiff stats: +${result.additions} -${result.deletions}`;
+      const validationText = result.validation
+        ? `\nValidation: ${result.validation.policy} ${result.validation.verdict}`
+        : "";
+      const text = `# Save Prompt File\n\nSaved: ${result.path}\nTarget: ${result.target}\nExisted before: ${result.existed}\nBytes: ${result.bytes}\nSHA-256: ${result.sha256}\nDiff stats: +${result.additions} -${result.deletions}${validationText}`;
       return textResult(text, {
         workspace_id: workspace.id,
         root: workspace.root,
@@ -1587,7 +1592,8 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         existed: result.existed,
         additions: result.additions,
         deletions: result.deletions,
-        changed: result.changed
+        changed: result.changed,
+        validation: result.validation
       });
     }
   );

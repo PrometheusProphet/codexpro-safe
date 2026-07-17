@@ -3,6 +3,10 @@ import type { CodexProConfig } from "./config.js";
 import type { Workspace } from "./guard.js";
 import { CodexProError, PathGuard } from "./guard.js";
 import { writeTextFile } from "./fsOps.js";
+import {
+  validatePromptBeforeSave,
+  type PromptValidationResult
+} from "./promptContractValidation.js";
 
 export type PromptFileTarget = "ai_bridge" | "chatgpt_generated" | "loop_inbox";
 
@@ -22,6 +26,7 @@ export interface SavePromptFileInput {
   prompt: string;
   filename?: string;
   overwrite?: boolean;
+  contractManifest?: unknown;
 }
 
 export interface SavePromptFileResult {
@@ -33,6 +38,7 @@ export interface SavePromptFileResult {
   additions: number;
   deletions: number;
   changed: boolean;
+  validation?: PromptValidationResult;
 }
 
 function trimTrailingSlashes(value: string): string {
@@ -110,6 +116,12 @@ export async function savePromptFile(
 ): Promise<SavePromptFileResult> {
   const prompt = String(input.prompt ?? "");
   if (!prompt.trim()) throw new CodexProError("prompt must not be empty.");
+  const validation = await validatePromptBeforeSave(
+    guard,
+    workspace,
+    prompt,
+    input.contractManifest
+  );
 
   const target = targetFrom(input.target);
   const targetDir = PROMPT_TARGET_DIRS[target](config);
@@ -129,6 +141,7 @@ export async function savePromptFile(
     existed: result.existed,
     additions: result.diff.additions,
     deletions: result.diff.deletions,
-    changed: result.diff.changed
+    changed: result.diff.changed,
+    validation
   };
 }

@@ -92,7 +92,7 @@ codexpro start \
 - Do not commit printed connector URLs that include `codexpro_token`.
 - Do not commit Cloudflare tunnel tokens.
 - Use `--mode handoff` for planning workflows where ChatGPT should not edit source files.
-- In handoff mode, generic `write` and `edit` stay limited to `.ai-bridge/`. `save_prompt_file` may save generated prompts only under `.ai-bridge/prompts/`, `docs/chatgpt/generated-prompts/`, or `docs/loop/inbox/`; it is not a source-editing tool.
+- In handoff mode, generic `write` and `edit` stay limited to `.ai-bridge/`. `save_prompt_file` may save generated prompts only under `.ai-bridge/prompts/`, `docs/chatgpt/generated-prompts/`, or `docs/loop/inbox/`; it is not a source-editing tool. A workspace may opt into native `product-contract-v1` validation through `.codexpro/prompt-save-policy.json`; required manifests are validated before the write path and no workspace command is executed.
 - Preview local handoff execution with `codexpro execute-handoff --dry-run` before running an unfamiliar adapter or custom command.
 - Keep `execute-handoff` local. Do not wrap it in a remote MCP tool unless you add a stronger approval and sandbox story.
 - Use `--mode agent --write workspace` only with trusted ChatGPT sessions and repo-specific roots.

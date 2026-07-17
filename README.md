@@ -1012,6 +1012,21 @@ The launcher uses `handoff` unless you explicitly pass `--write workspace`.
 
 `save_prompt_file` is the narrow exception for prompt handoff and coordination. In standard and full tool modes it can save generated prompts only as `.md` or `.txt` files under fixed prompt-only targets: `.ai-bridge/prompts/`, `docs/chatgpt/generated-prompts/`, or `docs/loop/inbox/`. It returns safe metadata and diff stats, not the prompt body or full diff. It does not accept arbitrary directories, does not execute commands, and does not allow generic source editing. Use `workspace` write mode only for trusted direct source edits.
 
+A workspace can require structured prompt-contract validation before any prompt
+write by adding `.codexpro/prompt-save-policy.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "validator": "product-contract-v1",
+  "requireManifest": true
+}
+```
+
+When enabled, every `save_prompt_file` call must include `contract_manifest`.
+Missing or invalid manifests fail before filename creation or file writing.
+Repositories without this policy retain the existing prompt-save behavior.
+
 ## Tool modes
 
 `CODEXPRO_TOOL_MODE=standard` is the default. It exposes the normal coding loop plus bounded source inspection, `show_changes`, Pro context export, prompt saves, and generic agent handoff. Generic read/write/edit/bash are mode-dependent or full-mode compatibility tools.
