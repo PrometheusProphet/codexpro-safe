@@ -6,6 +6,8 @@ import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
+const packageMetadata = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'));
+
 async function getFreePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -94,6 +96,7 @@ async function listTools(url, token) {
   try {
     await client.connect(transport);
     const result = await client.listTools();
+    assertPromptManifestSchema(result.tools);
     return result.tools;
   } finally {
     await client.close();
@@ -135,6 +138,41 @@ async function callTool(client, name, args = {}) {
   return result;
 }
 
+async function expectToolError(client, name, args, expected) {
+  const result = await client.callTool({ name, arguments: args });
+  const text = result.content?.find?.((part) => part.type === 'text')?.text ?? JSON.stringify(result.structuredContent);
+  if (!result.isError || !expected.test(text)) {
+    throw new Error(`expected ${name} to fail with ${expected}, got: ${text}`);
+  }
+}
+
+async function assertFileMissing(filePath) {
+  try {
+    await fs.stat(filePath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  throw new Error(`expected file to be absent: ${filePath}`);
+}
+
+function schemaAllowsObject(schema) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return false;
+  if (schema.type === 'object' || (Array.isArray(schema.type) && schema.type.includes('object'))) return true;
+  return ['anyOf', 'oneOf', 'allOf'].some((key) =>
+    Array.isArray(schema[key]) && schema[key].some((candidate) => schemaAllowsObject(candidate))
+  );
+}
+
+function assertPromptManifestSchema(tools) {
+  const savePromptTool = tools.find((tool) => tool.name === 'save_prompt_file');
+  if (!savePromptTool) throw new Error('HTTP tools/list missing save_prompt_file');
+  const manifestSchema = savePromptTool.inputSchema?.properties?.contract_manifest;
+  if (!schemaAllowsObject(manifestSchema)) {
+    throw new Error(`save_prompt_file contract_manifest is not object-capable: ${JSON.stringify(manifestSchema)}`);
+  }
+}
+
 async function listResourcesOrEmpty(client) {
   try {
     return await client.listResources();
@@ -157,6 +195,12 @@ await fs.writeFile(path.join(root, '.codex', 'skills', 'http-smoke-skill', 'SKIL
   '# HTTP Smoke Skill',
   ''
 ].join('\n'), 'utf8');
+await fs.mkdir(path.join(root, '.codexpro'), { recursive: true });
+await fs.writeFile(path.join(root, '.codexpro', 'prompt-save-policy.json'), JSON.stringify({
+  schemaVersion: 1,
+  validator: 'product-contract-v1',
+  requireManifest: true
+}, null, 2));
 const port = await getFreePort();
 const token = 'codexpro-http-smoke-token';
 const child = spawn('node', ['dist/http.js'], {
@@ -256,6 +300,16 @@ try {
     if (widgetMeta.ui?.domain !== 'https://widgets.codexpro.test' || widgetMeta['openai/widgetDomain'] !== 'https://widgets.codexpro.test') {
       throw new Error('HTTP tool-card widget resource did not expose standard and ChatGPT widget domain metadata');
     }
+    const config = await callTool(client, 'server_config');
+    if (config.structuredContent.packageVersion !== packageMetadata.version) {
+      throw new Error(`server_config packageVersion was ${config.structuredContent.packageVersion}, expected ${packageMetadata.version}`);
+    }
+    if (!/^sha256:[a-f0-9]{64}$/.test(config.structuredContent.runtimeBuildFingerprint ?? '')) {
+      throw new Error(`server_config runtimeBuildFingerprint has unexpected shape: ${config.structuredContent.runtimeBuildFingerprint}`);
+    }
+    if (!/^built:[^/\\]+$/.test(config.structuredContent.runtimeArtifactName ?? '')) {
+      throw new Error(`server_config runtimeArtifactName was not a compact built artifact: ${config.structuredContent.runtimeArtifactName}`);
+    }
   });
 
   const currentOpened = await withClient(mcpUrl, token, async (client) => {
@@ -325,6 +379,44 @@ try {
     throw new Error('read-only HTTP smoke path created .ai-bridge unexpectedly');
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
+  }
+
+  const missingPromptPath = path.join(root, '.ai-bridge', 'prompts', 'policy-missing-http.md');
+  const savedPromptPath = path.join(root, '.ai-bridge', 'prompts', 'policy-green-http.md');
+  const greenPrompt = 'Implement the bounded Green HTTP smoke prompt.';
+  await withClient(mcpUrl, token, async (client) => {
+    await expectToolError(client, 'save_prompt_file', {
+      workspace_id: opened,
+      filename: 'policy-missing-http.md',
+      prompt: greenPrompt
+    }, /requires contract_manifest/i);
+    await assertFileMissing(missingPromptPath);
+
+    const saved = await callTool(client, 'save_prompt_file', {
+      workspace_id: opened,
+      filename: 'policy-green-http.md',
+      prompt: greenPrompt,
+      contract_manifest: {
+        schemaVersion: 1,
+        promptId: 'http-smoke-green',
+        profile: 'green',
+        contractTriggers: [],
+        productAuthorityReferences: [],
+        parentRequirementIds: [],
+        requirements: [],
+        omittedParentRows: []
+      }
+    });
+    if (saved.structuredContent.validation?.verdict !== 'passed'
+      || saved.structuredContent.validation?.policy !== 'product-contract-v1') {
+      throw new Error(`manifested HTTP prompt save did not pass validation: ${JSON.stringify(saved.structuredContent.validation)}`);
+    }
+    if (saved.structuredContent.path !== '.ai-bridge/prompts/policy-green-http.md') {
+      throw new Error(`manifested HTTP prompt save returned unexpected path: ${saved.structuredContent.path}`);
+    }
+  });
+  if (await fs.readFile(savedPromptPath, 'utf8') !== `${greenPrompt}\n`) {
+    throw new Error('manifested HTTP prompt save wrote unexpected contents');
   }
 
   await withClient(mcpUrl, token, async (client) => {

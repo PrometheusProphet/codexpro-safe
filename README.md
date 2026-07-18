@@ -392,6 +392,8 @@ From a source checkout:
 npm run connect:setup
 ```
 
+After changing TypeScript source in a checkout, run `npm run build` and restart CodexPro. Then refresh the CodexPro actions in ChatGPT so it reloads the current tool descriptors.
+
 Preflight diagnostics:
 
 ```bash

@@ -8,6 +8,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
+import { STALE_BUILD_ERROR, assertBuildFreshness, inspectBuildFreshness } from './build-freshness.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_TUNNEL = 'none';
@@ -1619,8 +1620,6 @@ async function runDoctor(argv) {
     ?? process.env.NGROK_DOMAIN
     ?? profile.hostname
     ?? '';
-  const httpPath = path.join(projectRoot, 'dist', 'http.js');
-  const serverPath = path.join(projectRoot, 'dist', 'server.js');
   const cloudflaredPath = localOrPathCommand(
     effectiveArgs.cloudflared ?? process.env.CLOUDFLARED_BIN ?? 'cloudflared',
     localCloudflaredPath()
@@ -1645,7 +1644,15 @@ async function runDoctor(argv) {
   ]);
 
   record(compareMajorVersion(process.versions.node, 20) ? 'ok' : 'fail', 'Node', `v${process.versions.node} (requires >=20)`);
-  record(fs.existsSync(httpPath) && fs.existsSync(serverPath) ? 'ok' : 'fail', 'Build artifacts', fs.existsSync(httpPath) ? 'dist ready' : 'missing dist/http.js; run npm ci --ignore-scripts && npm run build');
+  const buildFreshness = inspectBuildFreshness({ projectRoot });
+  if (buildFreshness.status === 'missing') {
+    const missing = buildFreshness.missingArtifacts.map((artifact) => path.relative(projectRoot, artifact)).join(', ');
+    record('fail', 'Build artifacts', `missing ${missing}; run npm ci --ignore-scripts && npm run build`);
+  } else if (buildFreshness.status === 'stale') {
+    record('fail', 'Build artifacts', STALE_BUILD_ERROR);
+  } else {
+    record('ok', 'Build artifacts', 'dist ready');
+  }
   record(fs.existsSync(path.join(projectRoot, 'package.json')) ? 'ok' : 'fail', 'Package root', projectRoot);
   record(profile.profilePath ? 'ok' : 'warn', 'Saved profile', profile.profilePath ? profileSummary(profile) || profile.profilePath : 'not loaded by default; pass --profile to use one');
   record(clipboard ? 'ok' : 'warn', 'Clipboard', clipboard || 'not found; URL will be printed for manual copy');
@@ -2426,9 +2433,7 @@ async function main() {
   }
 
   const httpPath = path.join(projectRoot, 'dist', 'http.js');
-  if (!fs.existsSync(httpPath)) {
-    throw new Error(`Missing ${httpPath}. Run npm ci --ignore-scripts && npm run build first.`);
-  }
+  assertBuildFreshness({ projectRoot });
 
   await assertPortAvailable(host, port);
 

@@ -15,6 +15,9 @@ import { codexproInventory, loadSkill } from "./capabilitiesOps.js";
 import { TOOL_CARD_MIME_TYPE, TOOL_CARD_URI, toolCardWidgetHtml } from "./toolCardWidget.js";
 import { redactSensitiveText, redactStructured } from "./redact.js";
 import { savePromptFile } from "./promptFileOps.js";
+import { runtimeBuildInfo } from "./buildInfo.js";
+
+const RUNTIME_BUILD_INFO = runtimeBuildInfo(import.meta.url);
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return redactSensitiveText(`${error.name}: ${error.message}`);
@@ -695,7 +698,10 @@ function getSharedWorkspaceManager(config: CodexProConfig): WorkspaceManager {
 export function createCodexProServer(config: CodexProConfig): McpServer {
   const workspaces = getSharedWorkspaceManager(config);
   const guard = new PathGuard(config);
-  const server = new McpServer({ name: "CodexPro", version: "0.28.5" }, { instructions: serverInstructions(config) });
+  const server = new McpServer(
+    { name: "CodexPro", version: RUNTIME_BUILD_INFO.packageVersion },
+    { instructions: serverInstructions(config) }
+  );
   registerToolCardResource(server, config);
 
   registerCodexTool(
@@ -716,6 +722,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     async () => {
       const exposure = toolExposureForMode(config);
       const safeConfig = {
+        ...RUNTIME_BUILD_INFO,
         defaultRoot: config.defaultRoot,
         allowedRoots: config.allowedRoots,
         host: config.host,
