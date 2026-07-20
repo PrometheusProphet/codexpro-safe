@@ -35,6 +35,41 @@ const RESULT_KINDS = new Set([
   "status",
   "workflow"
 ]);
+const RESULT_SCHEMA_VERSION = 1;
+const RESULT_FIELDS = [
+  "schemaVersion",
+  "kind",
+  "visibleOutcome",
+  "target",
+  "view",
+  "objectType",
+  "objectId",
+  "operation",
+  "format",
+  "workflow",
+  "context"
+] as const;
+const RESULT_FIELD_SET = new Set<string>(RESULT_FIELDS);
+const OPTIONAL_RESULT_IDENTITY_FIELDS = RESULT_FIELDS.slice(3);
+
+const RESULT_KIND_FIELDS = new Map<string, ReadonlySet<string>>([
+  ["callback", new Set(["context"])],
+  ["destination", new Set(["target", "view", "objectType", "objectId", "context"])],
+  ["disabled", new Set(["context"])],
+  ["export", new Set(["format", "objectType", "objectId", "context"])],
+  ["mutation", new Set(["operation", "objectType", "objectId", "context"])],
+  ["other", new Set(["context"])],
+  ["selection", new Set(["view", "objectType", "objectId", "context"])],
+  ["status", new Set(["context"])],
+  ["workflow", new Set(["workflow", "objectType", "objectId", "context"])]
+]);
+
+const REQUIRED_RESULT_KIND_FIELD = new Map<string, string>([
+  ["destination", "target"],
+  ["export", "format"],
+  ["mutation", "operation"],
+  ["workflow", "workflow"]
+]);
 const PARENT_STATUSES = new Set(["blocked", "complete", "open"]);
 const LOCAL_SCOPES = new Set(["in_scope", "outside_local_edit_scope"]);
 const PROFILES = new Set(["green", "yellow", "red", "complex"]);
@@ -161,6 +196,10 @@ export function validatePromptContractManifest(manifest: unknown): string[] {
     || omittedParentRows.length > 0;
   if (!gateApplies) return failures;
 
+  if (manifest.resultSchemaVersion !== RESULT_SCHEMA_VERSION) {
+    failures.push(`resultSchemaVersion must be ${RESULT_SCHEMA_VERSION}.`);
+  }
+
   if (authorityReferences.length === 0
     || authorityReferences.some((value) => !isNonEmptyString(value))) {
     failures.push("Triggered manifests require productAuthorityReferences.");
@@ -270,19 +309,58 @@ function validateOmittedRow(
 }
 
 function validateResult(value: unknown, rowId: string, field: string, failures: string[]): boolean {
-  if (!isRecord(value) || !RESULT_KINDS.has(String(value.kind))) {
+  if (!isRecord(value)) {
     failures.push(`${rowId}: ${field}.kind is invalid.`);
     return false;
   }
-  if (value.kind === "destination" && !isNonEmptyString(value.target)) {
-    failures.push(`${rowId}: ${field}.target is required for a destination.`);
-    return false;
+
+  const unknownFields = Object.keys(value).filter((key) => !RESULT_FIELD_SET.has(key));
+  if (unknownFields.length > 0) {
+    failures.push(`${rowId}: ${field} contains unsupported semantic fields: ${unknownFields.sort().join(", ")}.`);
   }
-  return true;
+  if (value.schemaVersion !== RESULT_SCHEMA_VERSION) {
+    failures.push(`${rowId}: ${field}.schemaVersion must be ${RESULT_SCHEMA_VERSION}.`);
+  }
+  if (!RESULT_KINDS.has(String(value.kind))) {
+    failures.push(`${rowId}: ${field}.kind is invalid.`);
+  }
+  if (!isNonEmptyString(value.visibleOutcome)) {
+    failures.push(`${rowId}: ${field}.visibleOutcome is required.`);
+  }
+
+  const allowedKindFields = RESULT_KIND_FIELDS.get(String(value.kind));
+  const unsupportedKindFields = OPTIONAL_RESULT_IDENTITY_FIELDS.filter((key) => (
+    value[key] !== undefined && allowedKindFields !== undefined && !allowedKindFields.has(key)
+  ));
+  if (unsupportedKindFields.length > 0) {
+    failures.push(`${rowId}: ${field}.${String(value.kind)} does not allow: ${unsupportedKindFields.join(", ")}.`);
+  }
+
+  const requiredKindField = REQUIRED_RESULT_KIND_FIELD.get(String(value.kind));
+  if (requiredKindField && !isNonEmptyString(value[requiredKindField])) {
+    failures.push(`${rowId}: ${field}.${requiredKindField} is required for ${String(value.kind)}.`);
+  }
+  for (const key of OPTIONAL_RESULT_IDENTITY_FIELDS) {
+    if (value[key] !== undefined && !isNonEmptyString(value[key])) {
+      failures.push(`${rowId}: ${field}.${key} must be a non-empty string when supplied.`);
+    }
+  }
+  if (value.objectId !== undefined && !isNonEmptyString(value.objectType)) {
+    failures.push(`${rowId}: ${field}.objectType is required when objectId is supplied.`);
+  }
+
+  return unknownFields.length === 0
+    && value.schemaVersion === RESULT_SCHEMA_VERSION
+    && RESULT_KINDS.has(String(value.kind))
+    && isNonEmptyString(value.visibleOutcome)
+    && unsupportedKindFields.length === 0
+    && (!requiredKindField || isNonEmptyString(value[requiredKindField]))
+    && OPTIONAL_RESULT_IDENTITY_FIELDS.every((key) => value[key] === undefined || isNonEmptyString(value[key]))
+    && (value.objectId === undefined || isNonEmptyString(value.objectType));
 }
 
 function sameResult(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
-  return left.kind === right.kind && (left.kind !== "destination" || left.target === right.target);
+  return RESULT_FIELDS.every((field) => left[field] === right[field]);
 }
 
 function uniqueStrings(values: unknown[], field: string, failures: string[]): Set<string> {

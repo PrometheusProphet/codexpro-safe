@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed `product-contract-v1` to compare complete semantic result identity and reject malformed or kind-incompatible structured results, preventing false rejections of valid same-kind repairs.
 - Added source-checkout build freshness checks, HTTP regression coverage for manifested prompt saves, and runtime build identity in `server_config` so stale compiled tool schemas fail visibly instead of running silently.
 - Made bundled ChatGPT HTML tool cards opt-in with `--tool-card-mode compact` / `CODEXPRO_TOOL_CARD_MODE=compact`; the default no longer advertises custom widget metadata or registers the widget resource, reducing long-chat UI bloat while preserving tool text, structured data, errors, and compact-card opt-in.
 

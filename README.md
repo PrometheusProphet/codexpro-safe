@@ -1028,6 +1028,14 @@ write by adding `.codexpro/prompt-save-policy.json`:
 When enabled, every `save_prompt_file` call must include `contract_manifest`.
 Missing or invalid manifests fail before filename creation or file writing.
 Repositories without this policy retain the existing prompt-save behavior.
+Structured contract manifests declare `resultSchemaVersion: 1`. Each
+`requiredResult`, `currentResult`, and `proposedResult` declares
+`schemaVersion: 1`, a supported `kind`, a non-empty `visibleOutcome`, and only
+the identity fields allowed for that kind: `target`, `view`, `objectType`,
+`objectId`, `operation`, `format`, `workflow`, or `context`. Destination,
+export, mutation, and workflow results respectively require `target`, `format`,
+`operation`, and `workflow`; supplying `objectId` also requires `objectType`.
+Empty-contract Green manifests remain compatible without structured results.
 
 ## Tool modes
 

@@ -681,6 +681,7 @@ await expectToolError(
     prompt: 'This prompt must not preserve a status-only destination defect.',
     contract_manifest: {
       schemaVersion: 1,
+      resultSchemaVersion: 1,
       promptId: 'policy-invalid',
       profile: 'complex',
       contractTriggers: ['parity', 'visible-destination-command'],
@@ -689,9 +690,14 @@ await expectToolError(
       requirements: [{
         id: 'leaf-engagement-detail',
         label: 'Explore to Engagement detail',
-        requiredResult: { kind: 'destination', target: 'Engagement detail' },
-        currentResult: { kind: 'status' },
-        proposedResult: { kind: 'status' },
+        requiredResult: {
+          schemaVersion: 1,
+          kind: 'destination',
+          visibleOutcome: 'Open the selected item detail',
+          target: 'Item detail'
+        },
+        currentResult: { schemaVersion: 1, kind: 'status', visibleOutcome: 'Show status only' },
+        proposedResult: { schemaVersion: 1, kind: 'status', visibleOutcome: 'Show status only' },
         disposition: 'preserved',
         localScope: 'in_scope',
         parentStatus: 'complete',
@@ -733,6 +739,78 @@ await expectToolError(
 );
 if (await fs.access(policyHashMismatchPath).then(() => true, () => false)) {
   throw new Error('save_prompt_file wrote policy-hash-mismatch.md before rejecting the mismatched hash');
+}
+
+const semanticResultPrompt = 'Repair the runtime file structural-pressure distribution.';
+const semanticResultRequired = {
+  schemaVersion: 1,
+  kind: 'other',
+  visibleOutcome: 'Normalize across runtime files at or above 500 SLOC and show under-500 only as muted context',
+  context: 'Runtime file structural-pressure distribution'
+};
+const semanticResultCurrent = {
+  schemaVersion: 1,
+  kind: 'other',
+  visibleOutcome: 'Normalize across all runtime files so under-500 dominates',
+  context: 'Runtime file structural-pressure distribution'
+};
+const semanticResultManifest = (proposedResult) => ({
+  schemaVersion: 1,
+  resultSchemaVersion: 1,
+  promptId: 'semantic-result-equivalence',
+  profile: 'complex',
+  contractTriggers: ['parity'],
+  productAuthorityReferences: ['sanitized product contract'],
+  parentRequirementIds: ['runtime-file-distribution'],
+  requirements: [{
+    id: 'runtime-file-distribution',
+    label: 'Runtime file distribution normalization',
+    requiredResult: semanticResultRequired,
+    currentResult: semanticResultCurrent,
+    proposedResult,
+    disposition: 'repaired',
+    localScope: 'in_scope',
+    parentStatus: 'complete',
+    proof: ['sanitized semantic result row'],
+    knownDefect: true
+  }],
+  omittedParentRows: []
+});
+
+const semanticResultInvalidPath = path.join(promptRoot, '.ai-bridge', 'prompts', 'semantic-result-invalid.md');
+await expectToolError(
+  'save_prompt_file',
+  {
+    workspace_id: promptWs,
+    target: 'ai_bridge',
+    filename: 'semantic-result-invalid.md',
+    prompt: semanticResultPrompt,
+    contract_manifest: semanticResultManifest(semanticResultCurrent)
+  },
+  /repaired requires|weakens or changes/i,
+  handoffPromptClient
+);
+if (await fs.access(semanticResultInvalidPath).then(() => true, () => false)) {
+  throw new Error('save_prompt_file wrote semantic-result-invalid.md before rejecting the mismatched proposed result');
+}
+
+const semanticResultSaved = await handoffPromptClient.request('tools/call', {
+  name: 'save_prompt_file',
+  arguments: {
+    workspace_id: promptWs,
+    target: 'ai_bridge',
+    filename: 'semantic-result-valid.md',
+    prompt: semanticResultPrompt,
+    contract_manifest: semanticResultManifest(semanticResultRequired)
+  }
+});
+if (semanticResultSaved.structuredContent.validation?.verdict !== 'passed'
+  || semanticResultSaved.structuredContent.validation?.policy !== 'product-contract-v1') {
+  throw new Error(`semantic result save did not return a passing product-contract-v1 receipt: ${JSON.stringify(semanticResultSaved.structuredContent)}`);
+}
+const semanticResultSavedPath = path.join(promptRoot, '.ai-bridge', 'prompts', 'semantic-result-valid.md');
+if (await fs.readFile(semanticResultSavedPath, 'utf8') !== `${semanticResultPrompt}\n`) {
+  throw new Error('semantic result save wrote unexpected prompt contents');
 }
 
 const policyValidPrompt = await handoffPromptClient.request('tools/call', {
