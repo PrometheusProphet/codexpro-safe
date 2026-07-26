@@ -90,7 +90,7 @@ export interface PromptValidationResult {
 export async function validatePromptBeforeSave(
   guard: PathGuard,
   workspace: Workspace,
-  prompt: string,
+  persistedContent: string,
   manifest: unknown
 ): Promise<PromptValidationResult | undefined> {
   const policy = await loadPromptSavePolicy(guard, workspace);
@@ -101,18 +101,18 @@ export async function validatePromptBeforeSave(
     );
   }
 
-  const failures = validatePromptContractManifest(manifest);
+  const promptHash = `sha256:${createHash("sha256").update(persistedContent, "utf8").digest("hex")}`;
+  const completedManifest = isRecord(manifest)
+    ? { ...manifest, promptHash }
+    : manifest;
+  const failures = validatePromptContractManifest(completedManifest);
   if (failures.length > 0) {
     throw new CodexProError(
       ["Prompt contract validation failed before save:", ...failures.map((failure) => `- ${failure}`)].join("\n")
     );
   }
 
-  const record = manifest as Record<string, unknown>;
-  const promptHash = `sha256:${createHash("sha256").update(`${prompt.trimEnd()}\n`).digest("hex")}`;
-  if (record.promptHash !== undefined && record.promptHash !== promptHash) {
-    throw new CodexProError("Prompt contract validation failed before save:\n- promptHash does not match the prompt being saved.");
-  }
+  const record = completedManifest as Record<string, unknown>;
   return {
     policy: "product-contract-v1",
     promptId: String(record.promptId),

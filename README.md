@@ -1028,6 +1028,14 @@ write by adding `.codexpro/prompt-save-policy.json`:
 When enabled, every `save_prompt_file` call must include `contract_manifest`.
 Missing or invalid manifests fail before filename creation or file writing.
 Repositories without this policy retain the existing prompt-save behavior.
+Callers should omit `promptHash`. `save_prompt_file` finalizes the persisted
+prompt content by removing trailing whitespace and blank lines, then appending
+exactly one final newline; it computes `sha256:<lowercase hex>` from those exact
+UTF-8 bytes, completes an internal manifest copy, validates that completed
+manifest, and writes the same already-hashed content. A legacy caller-supplied
+`promptHash` remains accepted for compatibility but is treated as untrusted
+input and replaced by the authoritative computed value. The validation receipt
+returns that authoritative hash without mutating the caller's manifest.
 Structured contract manifests declare `resultSchemaVersion: 1`. Each
 `requiredResult`, `currentResult`, and `proposedResult` declares
 `schemaVersion: 1`, a supported `kind`, a non-empty `visibleOutcome`, and only

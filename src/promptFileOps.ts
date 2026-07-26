@@ -108,6 +108,10 @@ function promptFilename(input: SavePromptFileInput): string {
   return generatedFilename(input.title);
 }
 
+function persistedPromptContent(prompt: string): string {
+  return `${prompt.trimEnd()}\n`;
+}
+
 export async function savePromptFile(
   config: CodexProConfig,
   guard: PathGuard,
@@ -116,10 +120,11 @@ export async function savePromptFile(
 ): Promise<SavePromptFileResult> {
   const prompt = String(input.prompt ?? "");
   if (!prompt.trim()) throw new CodexProError("prompt must not be empty.");
+  const content = persistedPromptContent(prompt);
   const validation = await validatePromptBeforeSave(
     guard,
     workspace,
-    prompt,
+    content,
     input.contractManifest
   );
 
@@ -127,7 +132,6 @@ export async function savePromptFile(
   const targetDir = PROMPT_TARGET_DIRS[target](config);
   const filename = promptFilename(input);
   const relPath = `${targetDir}/${filename}`;
-  const content = `${prompt.trimEnd()}\n`;
   const result = await writeTextFile(config, guard, workspace, relPath, content, {
     createDirs: true,
     overwrite: input.overwrite

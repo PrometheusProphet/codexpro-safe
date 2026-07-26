@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -399,6 +400,7 @@ try {
       contract_manifest: {
         schemaVersion: 1,
         promptId: 'http-smoke-green',
+        promptHash: `sha256:${'0'.repeat(64)}`,
         profile: 'green',
         contractTriggers: [],
         productAuthorityReferences: [],
@@ -413,6 +415,18 @@ try {
     }
     if (saved.structuredContent.path !== '.ai-bridge/prompts/policy-green-http.md') {
       throw new Error(`manifested HTTP prompt save returned unexpected path: ${saved.structuredContent.path}`);
+    }
+    const writtenBytes = await fs.readFile(savedPromptPath);
+    const writtenDigest = createHash('sha256').update(writtenBytes).digest('hex');
+    if (saved.structuredContent.validation?.promptHash !== `sha256:${writtenDigest}`) {
+      throw new Error(`manifested HTTP prompt validation hash did not describe written bytes: ${JSON.stringify(saved.structuredContent.validation)}`);
+    }
+    if (saved.structuredContent.sha256 !== writtenDigest) {
+      throw new Error('manifested HTTP prompt file metadata hash did not match validation hash bytes');
+    }
+    const structuredPayload = JSON.stringify(saved.structuredContent);
+    if (Object.hasOwn(saved.structuredContent, 'diff') || structuredPayload.includes(greenPrompt)) {
+      throw new Error('manifested HTTP prompt save exposed the prompt body or raw diff');
     }
   });
   if (await fs.readFile(savedPromptPath, 'utf8') !== `${greenPrompt}\n`) {

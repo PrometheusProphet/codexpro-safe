@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
-import { validatePromptContractManifest } from "../dist/promptContractValidation.js";
+import { PathGuard } from "../dist/guard.js";
+import {
+  validatePromptBeforeSave,
+  validatePromptContractManifest
+} from "../dist/promptContractValidation.js";
 
 const destination = result("destination", "Engagement detail opens", {
   target: "Engagement detail",
@@ -162,6 +170,42 @@ test("requires top-level resultSchemaVersion for structured manifests", () => {
 
 test("allows a lightweight Green manifest without structured result schema", () => {
   assert.deepEqual(validatePromptContractManifest(greenManifest()), []);
+});
+
+test("completes an authoritative hash without mutating the caller manifest", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codexpro-prompt-validation-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, ".codexpro"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, ".codexpro", "prompt-save-policy.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      validator: "product-contract-v1",
+      requireManifest: true
+    }),
+    "utf8"
+  );
+  const manifest = {
+    ...greenManifest(),
+    promptHash: "malformed-legacy-hash"
+  };
+  const original = structuredClone(manifest);
+  const persistedContent = "Exact CRLF bytes stay here:\r\nUnicode: résumé 🚀\n";
+  const expectedHash = `sha256:${createHash("sha256").update(persistedContent, "utf8").digest("hex")}`;
+  const guard = new PathGuard({
+    blockedGlobs: [],
+    allowSymlinks: false
+  });
+  const validation = await validatePromptBeforeSave(
+    guard,
+    { id: "prompt-validation", root, openedAt: new Date(0).toISOString() },
+    persistedContent,
+    manifest
+  );
+
+  assert.deepEqual(manifest, original);
+  assert.equal(validation?.promptHash, expectedHash);
+  assert.equal(validation?.verdict, "passed");
 });
 
 export function greenManifest() {

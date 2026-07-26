@@ -1558,13 +1558,13 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     {
       title: "Save Prompt File",
       description:
-        "Save a generated Codex prompt as a Markdown/text file only under .ai-bridge/prompts, docs/chatgpt/generated-prompts, or docs/loop/inbox. Workspaces may require a product-contract-v1 manifest before any write. Works in handoff write mode, does not enable source writes, and does not execute commands.",
+        "Save a generated Codex prompt as a Markdown/text file only under .ai-bridge/prompts, docs/chatgpt/generated-prompts, or docs/loop/inbox. Workspaces may require a product-contract-v1 manifest before any write. The tool computes the authoritative promptHash from the exact persisted UTF-8 bytes. Works in handoff write mode, does not enable source writes, and does not execute commands.",
       inputSchema: {
         workspace_id: z.string().optional().describe("Workspace id from open_workspace. Omit to use default workspace."),
         target: z.enum(["ai_bridge", "chatgpt_generated", "loop_inbox"]).optional().describe("Approved prompt target. Default: ai_bridge."),
         title: z.string().optional().describe("Title used to generate a safe timestamped Markdown filename when filename is omitted."),
         prompt: z.string().describe("Generated Codex prompt content to save."),
-        contract_manifest: z.record(z.unknown()).optional().describe("Structured product-contract-v1 manifest. Required when the workspace prompt-save policy opts in."),
+        contract_manifest: z.record(z.unknown()).optional().describe("Structured product-contract-v1 manifest. Required when the workspace prompt-save policy opts in. Omit promptHash; the tool computes it from the exact persisted prompt bytes and replaces any legacy supplied value."),
         filename: z.string().optional().describe("Optional basename only, with .md or .txt extension. No directories, hidden names, traversal, or source extensions."),
         overwrite: z.boolean().optional().describe("Allow overwriting an existing prompt file. Default follows the write tool behavior.")
       },

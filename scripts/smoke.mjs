@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -517,6 +518,24 @@ function assertSavedUnder(result, prefix) {
   return relPath;
 }
 
+function promptDigest(content) {
+  return createHash('sha256').update(content, 'utf8').digest('hex');
+}
+
+function greenPromptManifest(promptId, promptHash) {
+  return {
+    schemaVersion: 1,
+    promptId,
+    ...(promptHash === undefined ? {} : { promptHash }),
+    profile: 'green',
+    contractTriggers: [],
+    productAuthorityReferences: [],
+    parentRequirementIds: [],
+    requirements: [],
+    omittedParentRows: []
+  };
+}
+
 const promptRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-prompt-smoke-'));
 await fs.writeFile(path.join(promptRoot, 'README.md'), '# Prompt smoke fixture\n', 'utf8');
 const handoffPromptClient = new McpStdioClient('node', ['dist/stdio.js', '--root', promptRoot, '--allow-root', promptRoot, '--write', 'handoff', '--tool-mode', 'standard'], {
@@ -714,31 +733,73 @@ if (await fs.access(policyInvalidPath).then(() => true, () => false)) {
   throw new Error('save_prompt_file wrote policy-invalid.md before rejecting the invalid manifest');
 }
 
-const policyHashMismatchPath = path.join(promptRoot, '.ai-bridge', 'prompts', 'policy-hash-mismatch.md');
-await expectToolError(
-  'save_prompt_file',
+const authoritativeHashCases = [
   {
-    workspace_id: promptWs,
-    target: 'ai_bridge',
-    filename: 'policy-hash-mismatch.md',
-    prompt: 'This prompt must match the manifest hash.',
-    contract_manifest: {
-      schemaVersion: 1,
-      promptId: 'policy-hash-mismatch',
-      promptHash: `sha256:${'0'.repeat(64)}`,
-      profile: 'green',
-      contractTriggers: [],
-      productAuthorityReferences: [],
-      parentRequirementIds: [],
-      requirements: [],
-      omittedParentRows: []
-    }
+    name: 'omitted-hash-no-final-newline',
+    prompt: 'No final newline',
+    persisted: 'No final newline\n'
   },
-  /promptHash does not match/i,
-  handoffPromptClient
-);
-if (await fs.access(policyHashMismatchPath).then(() => true, () => false)) {
-  throw new Error('save_prompt_file wrote policy-hash-mismatch.md before rejecting the mismatched hash');
+  {
+    name: 'stale-hash-one-final-newline',
+    prompt: 'One final newline\n',
+    persisted: 'One final newline\n',
+    suppliedHash: `sha256:${'0'.repeat(64)}`
+  },
+  {
+    name: 'malformed-hash-trailing-blank-lines',
+    prompt: 'Multiple trailing blank lines\n\n\n',
+    persisted: 'Multiple trailing blank lines\n',
+    suppliedHash: 'legacy-not-a-digest'
+  },
+  {
+    name: 'correct-hash-internal-crlf',
+    prompt: 'First CRLF line\r\nSecond CRLF line\r\n',
+    persisted: 'First CRLF line\r\nSecond CRLF line\n',
+    suppliedHashFromPersisted: true
+  },
+  {
+    name: 'unicode-prompt',
+    prompt: 'Résumé prompt — ship safely 🚀\n',
+    persisted: 'Résumé prompt — ship safely 🚀\n'
+  }
+];
+for (const testCase of authoritativeHashCases) {
+  const filename = `${testCase.name}.md`;
+  const expectedDigest = promptDigest(testCase.persisted);
+  const suppliedHash = testCase.suppliedHashFromPersisted
+    ? `sha256:${expectedDigest}`
+    : testCase.suppliedHash;
+  const saved = await handoffPromptClient.request('tools/call', {
+    name: 'save_prompt_file',
+    arguments: {
+      workspace_id: promptWs,
+      target: 'ai_bridge',
+      filename,
+      prompt: testCase.prompt,
+      contract_manifest: greenPromptManifest(testCase.name, suppliedHash)
+    }
+  });
+  const savedPath = fileForRel(promptRoot, assertSavedUnder(saved, '.ai-bridge/prompts/'));
+  const writtenBytes = await fs.readFile(savedPath);
+  const writtenDigest = createHash('sha256').update(writtenBytes).digest('hex');
+  if (!writtenBytes.equals(Buffer.from(testCase.persisted, 'utf8'))) {
+    throw new Error(`${testCase.name} did not follow the persisted-content contract`);
+  }
+  if (writtenDigest !== expectedDigest) {
+    throw new Error(`${testCase.name} written-byte digest mismatch: ${writtenDigest} !== ${expectedDigest}`);
+  }
+  if (saved.structuredContent.validation?.promptHash !== `sha256:${writtenDigest}`) {
+    throw new Error(`${testCase.name} validation hash did not describe written bytes: ${JSON.stringify(saved.structuredContent.validation)}`);
+  }
+  if (saved.structuredContent.sha256 !== writtenDigest) {
+    throw new Error(`${testCase.name} file metadata hash did not match validation hash bytes`);
+  }
+  const structuredPayload = JSON.stringify(saved.structuredContent);
+  if (Object.hasOwn(saved.structuredContent, 'diff')
+    || structuredPayload.includes(testCase.prompt)
+    || structuredPayload.includes(testCase.persisted)) {
+    throw new Error(`${testCase.name} exposed the prompt body or raw diff`);
+  }
 }
 
 const semanticResultPrompt = 'Repair the runtime file structural-pressure distribution.';
