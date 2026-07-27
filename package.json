@@ -69,6 +69,7 @@
     "connect:chatgpt": "node scripts/codexpro.mjs --tunnel none --mode handoff --bash off --write handoff",
     "connect:stable": "node scripts/codexpro.mjs --tunnel cloudflare-named --mode handoff --bash off --write handoff",
     "connect:ngrok": "node scripts/codexpro.mjs ngrok --mode handoff --bash off --write handoff",
+    "status:mcp:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/refresh-mcp-runtime-status.ps1",
     "pro:bundle": "node scripts/pro-bundle.mjs",
     "pro:apply": "node scripts/pro-apply.mjs"
   },
