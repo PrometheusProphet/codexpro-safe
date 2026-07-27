@@ -32,6 +32,16 @@ codexpro start
 
 `npx codexpro@latest start` still works as a no-install fallback, but the global install is easier for normal users.
 
+## Can Windows start, restart, and stop CodexPro-Safe without terminal windows?
+
+Yes. [CodexPro-Safe Manager](docs/WINDOWS_MANAGER.md) is the optional Windows
+notification-area application for the local connector and OpenAI tunnel client.
+It provides one-click lifecycle controls, sign-in startup, supervised recovery,
+and authenticated tunnel-health checks.
+
+The product and package remain **CodexPro-Safe**. Use **CodexPro-Safe Manager**
+for the Windows application and the corresponding ChatGPT plugin.
+
 ## What do I enable in ChatGPT?
 
 Open ChatGPT and go to:

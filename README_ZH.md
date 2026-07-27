@@ -115,6 +115,12 @@ npx codexpro@latest start --root /absolute/path/to/your/repo
 
 但普通用户更推荐全局安装，这样命令就是固定的 `codexpro setup` 和 `codexpro start`。
 
+Windows 用户也可以使用可选的
+[CodexPro-Safe Manager](docs/WINDOWS_MANAGER.md)，通过通知区域界面一键启动、
+重启和停止本地 connector 与 OpenAI tunnel client。产品和 npm 包名称仍然是
+**CodexPro-Safe**；Windows 应用和对应的 ChatGPT plugin 名称是
+**CodexPro-Safe Manager**。
+
 ## ChatGPT 中的 App 设置
 
 先在 ChatGPT 打开 Developer Mode：

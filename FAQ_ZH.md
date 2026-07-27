@@ -30,6 +30,15 @@ codexpro start
 
 `npx codexpro@latest start` 仍然可用，但普通用户更容易理解全局安装。
 
+## Windows 可以不用终端窗口来启动、重启和停止吗？
+
+可以。可选的 [CodexPro-Safe Manager](docs/WINDOWS_MANAGER.md) 用通知区域界面
+统一管理本地 connector 和 OpenAI tunnel client，并支持登录时启动、异常退出
+后恢复和经过认证的 tunnel 健康检查。
+
+产品和 npm 包名称仍然是 **CodexPro-Safe**；Windows 应用和对应的 ChatGPT
+plugin 名称是 **CodexPro-Safe Manager**。
+
 ## ChatGPT 里要打开什么设置？
 
 在 ChatGPT 中打开：
