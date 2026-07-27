@@ -334,6 +334,13 @@ CodexPro Safe prefers `Authorization: Bearer <token>`. It does not put the priva
 
 Keep the terminal running while ChatGPT uses the connector. When you stop it, the quick-tunnel URL stops working.
 
+On Windows, the optional [CodexPro-Safe Manager](docs/WINDOWS_MANAGER.md) can
+own the local connector and OpenAI tunnel client for you. It adds
+notification-area **Start All**, **Restart All**, and **Stop All** controls,
+sign-in startup, supervised recovery, and authenticated tunnel-health checks.
+This does not rename the CodexPro-Safe connector or replace the cross-platform
+CLI workflow.
+
 If `cloudflared` is missing, install it yourself, pass `--cloudflared <path>`, or explicitly run:
 
 ```bash
