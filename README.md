@@ -1154,6 +1154,12 @@ this is not evidence about a live
 Codex runtime, process lock, or Manager installation. Maintenance is not part
 of this profile.
 
+The same app-local helper also has a separate, source-only Windows transport
+for a future maintenance adapter. `codexpro-maintenance-fs-v1` binds one exact
+local NTFS root privately and performs bounded handle-relative walks and
+ID-only file reads; it is not registered through MCP and is not integrated or
+live-activated. See [Maintenance filesystem provider](docs/MAINTENANCE_FILESYSTEM_PROVIDER.md).
+
 By default the bash environment is sanitized. To inherit your full local environment:
 
 ```bash

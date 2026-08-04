@@ -65,6 +65,7 @@
     "test:diagnostic-manager-launch": "node scripts/diagnostic-manager-launch.test.mjs",
     "test:diagnostic-native-boundary": "node scripts/diagnostic-native-boundary.test.mjs",
     "test:manager-privacy": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/manager-operational-privacy.test.ps1",
+    "test:maintenance-filesystem": "npm run build && node scripts/maintenance-filesystem-provider.test.mjs",
     "doctor": "node scripts/codexpro.mjs doctor",
     "connect": "node scripts/codexpro.mjs --tunnel none --mode handoff --bash off --write handoff",
     "connect:setup": "node scripts/codexpro.mjs setup",

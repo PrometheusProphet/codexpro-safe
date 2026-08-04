@@ -31,6 +31,7 @@ namespace CodexProSafeManager
     internal static class DiagnosticHelperTrust
     {
         internal const string ProtocolVersion = "codexpro-diagnostic-v1";
+        internal const string MaintenanceFsProtocolVersion = "codexpro-maintenance-fs-v1";
         internal const string HelperFileName = "CodexProSafe.DiagnosticHelper.exe";
         internal const string ManifestFileName = "CodexProSafe.DiagnosticHelper.json";
         private const uint GenericRead = 0x80000000;
@@ -47,6 +48,7 @@ namespace CodexProSafeManager
         private sealed class HelperManifest
         {
             public string protocolVersion { get; set; }
+            public string maintenanceFsProtocolVersion { get; set; }
             public string executable { get; set; }
             public string sha256 { get; set; }
         }
@@ -58,7 +60,9 @@ namespace CodexProSafeManager
             string manifestPath = Path.Combine(directory, ManifestFileName);
             if (!File.Exists(manifestPath)) throw new InvalidOperationException("The Manager diagnostic helper package is incomplete.");
             HelperManifest manifest = new JavaScriptSerializer().Deserialize<HelperManifest>(File.ReadAllText(manifestPath));
-            if (manifest == null || manifest.protocolVersion != ProtocolVersion || manifest.executable != HelperFileName || !ValidHash(manifest.sha256))
+            if (manifest == null || manifest.protocolVersion != ProtocolVersion ||
+                manifest.maintenanceFsProtocolVersion != MaintenanceFsProtocolVersion ||
+                manifest.executable != HelperFileName || !ValidHash(manifest.sha256))
                 throw new InvalidOperationException("The Manager diagnostic helper manifest is invalid.");
             using (DiagnosticHelperLock packageLock = OpenPackageLock(directory, helper, manifest.sha256))
             {

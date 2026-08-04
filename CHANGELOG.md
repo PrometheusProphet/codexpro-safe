@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added the source-only Windows `codexpro-maintenance-fs-v1` helper mode and a
+  fingerprint-verifying TypeScript client. The one-shot private root binding,
+  handle-relative NTFS traversal, snapshot-scoped opaque IDs, bounded
+  hash/text reads, additive manifest capability, and adversarial synthetic
+  tests remain separate from MCP, Manager settings, installation, and live
+  activation.
 - Added fixed Manager `--set-codex-diagnostics` and `--safe-status` commands,
   encrypted atomic single-field settings updates with ACL preservation, an
   optional installer mode parameter, source-aware identifier redaction and raw

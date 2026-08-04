@@ -17,6 +17,8 @@ namespace CodexProSafeDiagnosticHelper
 
         private static int Main(string[] args)
         {
+            if (args.Length == 1 && args[0] == "--self-test-maintenance-fs") return MaintenanceFilesystemSelfTest.Run();
+            if (args.Length == 1 && args[0] == "--serve-maintenance-fs") return MaintenanceProtocolServer.Run();
             if (args.Length == 1 && args[0] == "--self-test") return NativeBoundarySelfTest.Run();
             if (args.Length != 1 || args[0] != "--serve") return 2;
             try

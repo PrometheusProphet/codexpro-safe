@@ -18,7 +18,11 @@ if (-not (Test-Path -LiteralPath $compiler)) {
 New-Item -ItemType Directory -Force -Path $bin, $obj | Out-Null
 
 $helperSources = @(
-    (Join-Path $project 'DiagnosticHelper\Program.cs')
+    (Join-Path $project 'DiagnosticHelper\Program.cs'),
+    (Join-Path $project 'DiagnosticHelper\MaintenanceNativeMethods.cs'),
+    (Join-Path $project 'DiagnosticHelper\MaintenanceFilesystemProvider.cs'),
+    (Join-Path $project 'DiagnosticHelper\MaintenanceProtocol.cs'),
+    (Join-Path $project 'DiagnosticHelper\MaintenanceFilesystemSelfTest.cs')
 )
 $helperOutput = Join-Path $bin 'CodexProSafe.DiagnosticHelper.exe'
 & $compiler /nologo /target:exe /platform:anycpu /optimize+ /warn:4 `
@@ -33,12 +37,17 @@ if (-not $SkipSelfTest) {
     if ($helperTest.ExitCode -ne 0) {
         throw "Diagnostic helper self-test failed with exit code $($helperTest.ExitCode)."
     }
+    $maintenanceHelperTest = Start-Process -FilePath $helperOutput -ArgumentList '--self-test-maintenance-fs' -Wait -PassThru -WindowStyle Hidden
+    if ($maintenanceHelperTest.ExitCode -ne 0) {
+        throw "Maintenance filesystem helper self-test failed with exit code $($maintenanceHelperTest.ExitCode)."
+    }
 }
 
 $helperHash = (Get-FileHash -LiteralPath $helperOutput -Algorithm SHA256).Hash.ToLowerInvariant()
 $helperManifest = Join-Path $bin 'CodexProSafe.DiagnosticHelper.json'
 [pscustomobject]@{
     protocolVersion = 'codexpro-diagnostic-v1'
+    maintenanceFsProtocolVersion = 'codexpro-maintenance-fs-v1'
     executable = 'CodexProSafe.DiagnosticHelper.exe'
     sha256 = $helperHash
 } | ConvertTo-Json -Compress | Set-Content -LiteralPath $helperManifest -Encoding UTF8

@@ -52,9 +52,11 @@ tools\CodexProSafe.Manager\bin\CodexProSafe.Manager.exe
 ```
 
 The same build explicitly compiles and self-tests the app-local diagnostic
-companion at `bin\CodexProSafe.DiagnosticHelper.exe`, then writes its protocol
-and SHA-256 manifest. The helper is a narrow fixed-root Win32 boundary; it is
-not installed globally and is never resolved through `PATH`.
+companion at `bin\CodexProSafe.DiagnosticHelper.exe`, then writes its protocols
+and SHA-256 manifest. Its existing fixed-root diagnostic mode remains separate
+from the source-only `--serve-maintenance-fs` local NTFS transport documented in
+[Maintenance filesystem provider](../../docs/MAINTENANCE_FILESYSTEM_PROVIDER.md).
+Neither mode is installed globally or resolved through `PATH`.
 
 ## First run
 

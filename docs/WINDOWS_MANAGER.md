@@ -167,7 +167,13 @@ match. In `read` mode it also refuses to use or take over an external connector
 because that process instance cannot satisfy the Manager-owned launch proof.
 
 The build produces `CodexProSafe.DiagnosticHelper.exe` and an exact SHA-256
-manifest beside the Manager. The installer copies both files to the same
+manifest beside the Manager. The manifest preserves the fixed diagnostic
+protocol and additively declares the source-only
+`codexpro-maintenance-fs-v1` capability. That second mode binds a caller-owned
+local NTFS root through private stdin and is not a Manager setting, connector
+tool, live activation, or arbitrary-root MCP surface. See
+[Maintenance filesystem provider](MAINTENANCE_FILESYSTEM_PROVIDER.md).
+The installer copies both files to the same
 per-user application directory and runs the Manager's noninteractive sealing
 mode, which persists the helper path, protocol, and fingerprint inside the
 existing DPAPI-protected settings. On connector start, the Manager verifies the
