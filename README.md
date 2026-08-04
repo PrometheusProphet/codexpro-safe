@@ -338,6 +338,9 @@ On Windows, the optional [CodexPro-Safe Manager](docs/WINDOWS_MANAGER.md) can
 own the local connector and OpenAI tunnel client for you. It adds
 notification-area **Start All**, **Restart All**, and **Stop All** controls,
 sign-in startup, supervised recovery, and authenticated tunnel-health checks.
+It also provides fixed no-UI diagnostic-mode and sanitized status commands;
+its source-aware log policy suppresses raw tunnel payloads, and the visual log
+buffer is not exposed through UI Automation.
 This does not rename the CodexPro-Safe connector or replace the cross-platform
 CLI workflow.
 

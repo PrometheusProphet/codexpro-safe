@@ -81,6 +81,27 @@ namespace CodexProSafeManager
             return OpenPackageLock(directory, expected, settings.DiagnosticHelperSha256);
         }
 
+        internal static string GetTrustState(AppSettings settings, string managerExecutable)
+        {
+            if (settings == null ||
+                String.IsNullOrWhiteSpace(settings.DiagnosticHelperPath) ||
+                String.IsNullOrWhiteSpace(settings.DiagnosticHelperProtocolVersion) ||
+                String.IsNullOrWhiteSpace(settings.DiagnosticHelperSha256))
+                return "unavailable";
+            try
+            {
+                using (DiagnosticHelperLock ignored = OpenVerifiedLock(settings, managerExecutable)) { }
+                return "sealed";
+            }
+            catch
+            {
+                string expected = Path.Combine(
+                    Path.GetDirectoryName(Path.GetFullPath(managerExecutable)),
+                    HelperFileName);
+                return File.Exists(expected) ? "invalid" : "unavailable";
+            }
+        }
+
         private static DiagnosticHelperLock OpenPackageLock(string directory, string helper, string expectedHash)
         {
             SafeFileHandle directoryHandle = OpenHandle(directory, FileReadAttributes | Synchronize,

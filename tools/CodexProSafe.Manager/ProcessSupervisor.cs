@@ -317,7 +317,7 @@ namespace CodexProSafeManager
                 Path.GetDirectoryName(settings.TunnelClientPath),
                 environment);
             AttachProcess(tunnel, "tunnel");
-            Emit("manager", "Starting tunnel profile " + settings.TunnelProfile + ".");
+            Emit("manager", "Starting configured tunnel.");
             tunnel.Start();
             tunnel.BeginOutputReadLine();
             tunnel.BeginErrorReadLine();
@@ -389,22 +389,27 @@ namespace CodexProSafeManager
         private int FindMatchingConnectorOwner(int portPid)
         {
             if (settings.CodexDiagnosticReadMode == "read") return -1;
+            return FindMatchingConnectorOwner(settings, portPid);
+        }
+
+        private static int FindMatchingConnectorOwner(AppSettings value, int portPid)
+        {
             if (portPid <= 0) return -1;
             ProcessIdentity child = GetIdentity(portPid);
             if (child == null || !String.Equals(child.Name, "node.exe", StringComparison.OrdinalIgnoreCase))
                 return -1;
             ProcessIdentity parent = GetIdentity(child.ParentProcessId);
-            string script = Path.Combine(settings.RepositoryPath, @"scripts\codexpro.mjs");
+            string script = Path.Combine(value.RepositoryPath, @"scripts\codexpro.mjs");
             if (parent == null || !String.Equals(parent.Name, "node.exe", StringComparison.OrdinalIgnoreCase))
                 return -1;
             if (!ContainsPathOrRelativeScript(parent.CommandLine, script)) return -1;
-            if (!ContainsArgument(parent.CommandLine, "--root", settings.WorkspaceRoot)) return -1;
-            if (!ContainsArgument(parent.CommandLine, "--allow-root", settings.AllowedRoot)) return -1;
+            if (!ContainsArgument(parent.CommandLine, "--root", value.WorkspaceRoot)) return -1;
+            if (!ContainsArgument(parent.CommandLine, "--allow-root", value.AllowedRoot)) return -1;
             if (!ContainsArgument(parent.CommandLine, "--tunnel", "none")) return -1;
             if (!ContainsArgument(parent.CommandLine, "--mode", "handoff")) return -1;
             if (!ContainsArgument(parent.CommandLine, "--bash", "off")) return -1;
             if (!ContainsArgument(parent.CommandLine, "--write", "handoff")) return -1;
-            if (!ContainsArgument(parent.CommandLine, "--codex-diagnostic-read", settings.CodexDiagnosticReadMode)) return -1;
+            if (!ContainsArgument(parent.CommandLine, "--codex-diagnostic-read", value.CodexDiagnosticReadMode)) return -1;
             return parent.ProcessId;
         }
 
@@ -473,8 +478,9 @@ namespace CodexProSafeManager
 
         private void Emit(string source, string message)
         {
-            string sanitized = LogWriter.Sanitize(message);
-            LogWriter.Append(source, sanitized);
+            string sanitized = LogWriter.Prepare(source, message);
+            if (sanitized == null) return;
+            LogWriter.AppendPrepared(source, sanitized);
             Action<string, string> handler = LogLine;
             if (handler != null) handler(source, sanitized);
         }
@@ -485,21 +491,9 @@ namespace CodexProSafeManager
             if (handler != null) handler();
         }
 
-        private static async Task<bool> ProbeAsync(string url)
+        private static Task<bool> ProbeAsync(string url)
         {
-            try
-            {
-                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
-                request.Method = "GET";
-                request.Timeout = 1500;
-                request.ReadWriteTimeout = 1500;
-                using (WebResponse response = await request.GetResponseAsync())
-                {
-                    HttpWebResponse http = response as HttpWebResponse;
-                    return http != null && (int)http.StatusCode >= 200 && (int)http.StatusCode < 300;
-                }
-            }
-            catch { return false; }
+            return LocalHealthProbes.ProbeAsync(url);
         }
 
         private static async Task<bool> WaitForProbeAsync(string url, int timeoutMs)
@@ -547,44 +541,9 @@ namespace CodexProSafeManager
             catch { return Double.MaxValue; }
         }
 
-        private async Task<bool> ProbeTunnelReadyAsync()
+        private Task<bool> ProbeTunnelReadyAsync()
         {
-            if (!await ProbeAsync("http://127.0.0.1:8080/readyz")) return false;
-            try
-            {
-                string body = await GetTextAsync("http://127.0.0.1:8080/api/status");
-                object parsed = new JavaScriptSerializer().DeserializeObject(body);
-                IDictionary<string, object> root = parsed as IDictionary<string, object>;
-                if (root == null) return false;
-
-                string controlPlaneTunnelId = DictionaryString(root, "control_plane_tunnel_id");
-                IDictionary<string, object> metadata = DictionaryValue(root, "tunnel_metadata");
-                string metadataTunnelId = metadata == null ? String.Empty : DictionaryString(metadata, "ID");
-                if (String.IsNullOrWhiteSpace(metadataTunnelId) ||
-                    !String.Equals(controlPlaneTunnelId, metadataTunnelId, StringComparison.Ordinal))
-                    return false;
-
-                string expectedTunnelId = ReadExpectedTunnelId();
-                if (!String.IsNullOrWhiteSpace(expectedTunnelId) &&
-                    !String.Equals(expectedTunnelId, metadataTunnelId, StringComparison.Ordinal))
-                    return false;
-
-                object channelsValue;
-                object[] channels = root.TryGetValue("channels", out channelsValue)
-                    ? channelsValue as object[]
-                    : null;
-                if (channels == null) return false;
-                foreach (object item in channels)
-                {
-                    IDictionary<string, object> channel = item as IDictionary<string, object>;
-                    if (channel == null) continue;
-                    if (String.Equals(DictionaryString(channel, "name"), "main", StringComparison.Ordinal) &&
-                        String.Equals(DictionaryString(channel, "probe_status"), "ok", StringComparison.OrdinalIgnoreCase))
-                        return true;
-                }
-                return false;
-            }
-            catch { return false; }
+            return LocalHealthProbes.ProbeTunnelReadyAsync(settings);
         }
 
         private async Task<bool> WaitForTunnelReadyAsync(int timeoutMs)
@@ -596,47 +555,6 @@ namespace CodexProSafeManager
                 await Task.Delay(350);
             }
             return false;
-        }
-
-        private string ReadExpectedTunnelId()
-        {
-            try
-            {
-                string profilePath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "tunnel-client",
-                    settings.TunnelProfile + ".yaml");
-                string content = File.ReadAllText(profilePath);
-                Match match = Regex.Match(
-                    content,
-                    @"(?m)^\s*tunnel_id\s*:\s*[""']?(tunnel_[A-Za-z0-9]+)[""']?\s*$");
-                return match.Success ? match.Groups[1].Value : String.Empty;
-            }
-            catch { return String.Empty; }
-        }
-
-        private static async Task<string> GetTextAsync(string url)
-        {
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
-            request.Method = "GET";
-            request.Timeout = 1500;
-            request.ReadWriteTimeout = 1500;
-            using (WebResponse response = await request.GetResponseAsync())
-            using (Stream stream = response.GetResponseStream())
-            using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
-                return await reader.ReadToEndAsync();
-        }
-
-        private static IDictionary<string, object> DictionaryValue(IDictionary<string, object> value, string key)
-        {
-            object found;
-            return value.TryGetValue(key, out found) ? found as IDictionary<string, object> : null;
-        }
-
-        private static string DictionaryString(IDictionary<string, object> value, string key)
-        {
-            object found;
-            return value.TryGetValue(key, out found) && found != null ? Convert.ToString(found) : String.Empty;
         }
 
         private static void KillTree(int pid)

@@ -470,6 +470,16 @@ const defaultOffChild = spawn('node', ['dist/http.js'], {
 try {
   await waitForListening(defaultOffChild);
   const defaultOffMcpUrl = `http://127.0.0.1:${defaultOffPort}/mcp`;
+  const managerStatusResponse = await fetch(`http://127.0.0.1:${defaultOffPort}/manager-safe-status-v1`, {
+    headers: { Authorization: `Bearer ${defaultOffToken}` }
+  });
+  const managerStatus = await managerStatusResponse.json();
+  if (managerStatusResponse.status !== 200 ||
+      JSON.stringify(Object.keys(managerStatus).sort()) !== JSON.stringify(['diagnosticMode', 'schema']) ||
+      managerStatus.schema !== 'codexpro-manager-connector-status-v1' ||
+      managerStatus.diagnosticMode !== 'off') {
+    throw new Error('fixed Manager connector status endpoint exposed an unexpected contract');
+  }
   const defaultOffTools = await listTools(defaultOffMcpUrl, defaultOffToken);
   const defaultOffToolNames = toolNames(defaultOffTools);
   for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'load_skill', 'show_changes', 'codex_context', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {

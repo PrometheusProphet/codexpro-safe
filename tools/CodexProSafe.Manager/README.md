@@ -22,11 +22,19 @@ for the current Windows user under:
 %LOCALAPPDATA%\CodexProSafe Manager\settings.dat
 ```
 
-Secrets are redacted from the UI and file logs. Logs are stored under:
+One bounded source-aware policy runs before both the UI and file sinks. It
+redacts recognized credentials, private operational identifiers, correlation
+values, URL secrets, and paths; raw third-party tunnel payload lines are
+suppressed in favor of fixed lifecycle summaries. Logs are stored under:
 
 ```text
 %LOCALAPPDATA%\CodexProSafe Manager\logs
 ```
+
+The in-window activity control is custom drawn. Accessibility/UI Automation
+receives only a fixed activity name and description, never accumulated log
+text. Other status and action controls remain accessible; the visual activity
+buffer is intentionally not selectable or exposed to screen readers.
 
 ## Build
 
@@ -107,6 +115,23 @@ The installed application lives under:
 That directory also contains the exact diagnostic helper and build manifest.
 Installation seals their contract but does not start diagnostics, restart live
 services, inspect `~/.codex`, or establish plugin callability by itself.
+
+For a separately authorized no-UI activation, the installer accepts only
+`-CodexDiagnostics off` or `-CodexDiagnostics read`. The same fixed operation is
+available directly after installation:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\CodexProSafe Manager\CodexProSafe.Manager.exe" --set-codex-diagnostics read
+& "$env:LOCALAPPDATA\Programs\CodexProSafe Manager\CodexProSafe.Manager.exe" --safe-status
+```
+
+The mode command atomically updates only the existing DPAPI-protected
+`CodexDiagnosticReadMode`; it preserves the file security descriptor and all
+other known or unknown settings. The safe-status command emits only fixed mode,
+helper-trust, local-health, authenticated-readiness, restart-required, and
+status-enum fields. Neither command controls processes, reads logs, accepts
+arbitrary paths/settings, or prints exception details. See the Windows Manager
+guide for the fixed exit-code contract and complete future operational flow.
 
 The installed Manager executable is also the connector's native launch-proof
 client. It authenticates the lifecycle Manager pipe server by PID and fixed

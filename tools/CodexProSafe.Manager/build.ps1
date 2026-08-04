@@ -46,6 +46,14 @@ $helperManifest = Join-Path $bin 'CodexProSafe.DiagnosticHelper.json'
 $sources = Get-ChildItem -LiteralPath $project -Filter '*.cs' |
     Sort-Object Name |
     ForEach-Object { $_.FullName }
+$gacRoot = Join-Path $env:WINDIR 'Microsoft.NET\assembly\GAC_MSIL'
+$uiAutomationClient = Get-ChildItem -LiteralPath (Join-Path $gacRoot 'UIAutomationClient') -Recurse -Filter 'UIAutomationClient.dll' -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+$uiAutomationTypes = Get-ChildItem -LiteralPath (Join-Path $gacRoot 'UIAutomationTypes') -Recurse -Filter 'UIAutomationTypes.dll' -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+if (-not $uiAutomationClient -or -not $uiAutomationTypes) {
+    throw 'The Windows UI Automation assemblies were not found.'
+}
 $references = @(
     'System.dll',
     'System.Core.dll',
@@ -53,7 +61,9 @@ $references = @(
     'System.Management.dll',
     'System.Security.dll',
     'System.Web.Extensions.dll',
-    'System.Windows.Forms.dll'
+    'System.Windows.Forms.dll',
+    $uiAutomationClient,
+    $uiAutomationTypes
 )
 $referenceArgs = $references | ForEach-Object { '/reference:' + $_ }
 $output = Join-Path $bin 'CodexProSafe.Manager.exe'

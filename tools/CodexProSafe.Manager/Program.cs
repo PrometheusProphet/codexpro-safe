@@ -7,11 +7,18 @@ namespace CodexProSafeManager
 {
     internal static class Program
     {
-        private const string MutexName = @"Local\CodexProSafe.Manager.Singleton";
+        internal const string MutexName = @"Local\CodexProSafe.Manager.Singleton";
 
         [STAThread]
         private static int Main(string[] args)
         {
+            string executable = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+            if (args.Length > 0 && String.Equals(args[0], "--set-codex-diagnostics", StringComparison.Ordinal))
+                return OperationalCommands.SetCodexDiagnostics(
+                    args, new SecureSettingsStore(), executable, Console.Out);
+            if (args.Length > 0 && String.Equals(args[0], "--safe-status", StringComparison.Ordinal))
+                return OperationalCommands.SafeStatus(
+                    args, new SecureSettingsStore(), executable, new FixedManagerStatusProbe(), Console.Out);
             if (args.Length == 2 && String.Equals(args[0], "--diagnostic-launch-proof-client", StringComparison.Ordinal))
                 return DiagnosticLaunchProofClient.Run(args[1], true, 3500);
             if (args.Length == 2 && String.Equals(args[0], "--diagnostic-launch-test-client", StringComparison.Ordinal))

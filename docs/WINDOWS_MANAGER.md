@@ -57,6 +57,75 @@ installs the executable under:
 %LOCALAPPDATA%\Programs\CodexProSafe Manager
 ```
 
+For a separately authorized diagnostic activation, the installer accepts only
+the fixed optional mode parameter:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\tools\CodexProSafe.Manager\install.ps1 -CodexDiagnostics read
+```
+
+The only accepted values are `off` and `read`. Omitting the parameter preserves
+the saved mode (and a new settings file defaults to `off`). The installer does
+not accept settings JSON, credentials, arbitrary field names, commands, or
+process-control options.
+
+## Noninteractive operational boundary
+
+The installed Manager provides two narrow commands before GUI and singleton
+startup. Neither starts, stops, restarts, attaches to, or takes over a service,
+and neither reads Manager logs. The mode command performs no process discovery;
+safe status performs only bounded read-only local health and saved-mode checks.
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\CodexProSafe Manager\CodexProSafe.Manager.exe" --set-codex-diagnostics read
+& "$env:LOCALAPPDATA\Programs\CodexProSafe Manager\CodexProSafe.Manager.exe" --set-codex-diagnostics off
+& "$env:LOCALAPPDATA\Programs\CodexProSafe Manager\CodexProSafe.Manager.exe" --safe-status
+```
+
+The mode command accepts exactly `read` or `off`, changes only
+`CodexDiagnosticReadMode` inside the existing current-user DPAPI payload, and
+returns a fixed JSON envelope containing only schema, command, status, mode,
+and `restartRequired`. It uses an encrypted same-directory atomic replacement,
+preserves the existing file owner and access rules, and leaves unrelated and
+unknown settings semantically unchanged. `read` fails closed unless the
+installed helper trust contract is sealed.
+
+`--safe-status` returns only this fixed field set:
+
+- schema version;
+- saved diagnostic mode (`off`, `read`, or `unavailable`);
+- helper trust (`sealed`, `unavailable`, or `invalid`);
+- connector local health;
+- tunnel local process health;
+- tunnel authenticated readiness;
+- whether a controlled connector restart is required;
+- fixed `overall` and `limitation` enums.
+
+It does not return settings values, paths, process data, endpoints, profiles,
+provider identifiers, or provider payloads. Exit code `0` means the bounded
+status was produced (including a truthful degraded state), `2` means invalid
+fixed command usage, `3` means the mode update was unavailable, and `4` means
+status or required helper trust was unsafe/unavailable.
+
+Restart detection does not trust process ancestry. The connector exposes one
+fixed loopback-only status document containing only its effective diagnostic
+mode after Manager launch proof has completed. Safe status reads that document
+with a small response bound and conservatively requires restart when it is
+missing, malformed, or differs from the saved mode.
+
+A future authorized no-UI activation therefore uses this bounded sequence:
+
+1. Exit the Manager safely after stopping only its owned services.
+2. Build and install/seal the accepted package, optionally with
+   `-CodexDiagnostics read`.
+3. If the installer did not set the mode, invoke the fixed mode command.
+4. Launch the Manager normally and perform the separately authorized controlled
+   restart.
+5. Use `--safe-status` and live connector diagnostic calls for verification.
+
+Installation or a mode update alone does not restart services or prove plugin
+callability.
+
 ## Configure the Manager
 
 Open **Settings** and confirm:
@@ -136,11 +205,28 @@ Read-only diagnostics are synthetic-test coverage only; they do not
 verify or inspect this user's live runtime during installation, and maintenance
 operations are not part of the setting.
 
-Logs are redacted and stored under:
+Logs are processed by one bounded policy before either disk persistence or the
+in-window activity view and are stored under:
 
 ```text
 %LOCALAPPDATA%\CodexProSafe Manager\logs
 ```
+
+Manager and connector lines redact recognized bearer/key/secret fields,
+provider-style identifiers, UUID correlation values in child output, private
+URL userinfo/query values, and local paths. Oversized lines are suppressed or
+bounded. Raw third-party tunnel payload lines are suppressed by default; only
+fixed high-level startup, readiness, health-wait, shutdown, and exit summaries
+are retained. This is a deliberately bounded policy, not a claim of universal
+secret detection.
+
+The visual activity surface is a custom-drawn control rather than a native text
+control. Its accessibility object exposes only a fixed name and description,
+not accumulated log text or children, so generic UI Automation cannot extract
+the activity buffer. Status labels, buttons, Settings controls, and other user
+actions remain accessible. The tradeoff is that the activity surface itself is
+not selectable or screen-reader-readable; no unrestricted export/copy action is
+provided.
 
 For the normal always-available setup, enable all four options:
 

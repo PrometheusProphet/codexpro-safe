@@ -97,14 +97,16 @@ namespace CodexProSafeManager
                 Assert(!sanitized.Contains(secret), "secret redaction");
                 Assert(sanitized.Contains("<redacted>") || sanitized.Contains("<redacted-key>"), "redaction marker");
 
+                OperationalPrivacySelfTest.Run(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
+
                 string reportPath = Path.Combine(Path.GetTempPath(), "CodexProSafe.Manager.self-test.txt");
                 File.WriteAllText(reportPath, "PASS " + DateTimeOffset.Now.ToString("O"));
                 return 0;
             }
-            catch (Exception exception)
+            catch
             {
                 string reportPath = Path.Combine(Path.GetTempPath(), "CodexProSafe.Manager.self-test.txt");
-                File.WriteAllText(reportPath, "FAIL " + exception);
+                File.WriteAllText(reportPath, "FAIL " + (OperationalPrivacySelfTest.LastStage ?? "core"));
                 return 1;
             }
         }

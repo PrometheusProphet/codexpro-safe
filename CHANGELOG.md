@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added fixed Manager `--set-codex-diagnostics` and `--safe-status` commands,
+  encrypted atomic single-field settings updates with ACL preservation, an
+  optional installer mode parameter, source-aware identifier redaction and raw
+  tunnel-output suppression, and a custom activity control that withholds
+  accumulated log text from UI Automation while retaining accessible status
+  and action controls.
 - Closed the direct-connector diagnostic launch bypass. A `read` request now
   remains effectively off until an expiring one-shot Windows pipe handshake
   mutually binds the fixed installed Manager process to a private capability

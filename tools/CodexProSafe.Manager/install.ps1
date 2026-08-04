@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [switch]$NoBuild,
-    [switch]$NoLaunch
+    [switch]$NoLaunch,
+    [ValidateSet('off', 'read')]
+    [string]$CodexDiagnostics
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +40,15 @@ if ($seal.ExitCode -ne 0) {
     throw "Manager could not seal the diagnostic helper fingerprint into DPAPI settings (exit $($seal.ExitCode))."
 }
 
+if ($PSBoundParameters.ContainsKey('CodexDiagnostics')) {
+    $modeUpdate = Start-Process -FilePath $installedExecutable `
+        -ArgumentList @('--set-codex-diagnostics', $CodexDiagnostics) `
+        -Wait -PassThru -WindowStyle Hidden
+    if ($modeUpdate.ExitCode -ne 0) {
+        throw "Manager could not update the fixed diagnostic mode (exit $($modeUpdate.ExitCode))."
+    }
+}
+
 $desktop = [Environment]::GetFolderPath('Desktop')
 $shortcutPath = Join-Path $desktop 'CodexPro-Safe Manager.lnk'
 $shell = New-Object -ComObject WScript.Shell
@@ -54,6 +65,7 @@ $result = [pscustomobject]@{
     Shortcut = $shortcutPath
     Sha256 = (Get-FileHash -LiteralPath $installedExecutable -Algorithm SHA256).Hash.ToLowerInvariant()
     DiagnosticHelperSha256 = (Get-FileHash -LiteralPath $installedHelper -Algorithm SHA256).Hash.ToLowerInvariant()
+    CodexDiagnostics = if ($PSBoundParameters.ContainsKey('CodexDiagnostics')) { $CodexDiagnostics } else { 'unchanged' }
 }
 $result
 

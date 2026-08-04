@@ -409,6 +409,13 @@ async function main(): Promise<void> {
     });
   });
 
+  app.get("/manager-safe-status-v1", (_req, res) => {
+    res.json({
+      schema: "codexpro-manager-connector-status-v1",
+      diagnosticMode: config.codexDiagnosticReadMode
+    });
+  });
+
   app.post("/mcp", async (req, res) => {
     try {
       const sessionId = req.headers["mcp-session-id"] as string | undefined;

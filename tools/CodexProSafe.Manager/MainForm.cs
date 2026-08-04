@@ -17,7 +17,7 @@ namespace CodexProSafeManager
         private readonly Label connectorDetail = new Label();
         private readonly Label tunnelState = new Label();
         private readonly Label tunnelDetail = new Label();
-        private readonly RichTextBox log = new RichTextBox();
+        private readonly PrivateLogView log = new PrivateLogView();
         private readonly NotifyIcon tray = new NotifyIcon();
         private readonly Timer timer = new Timer();
         private bool busy;
@@ -124,12 +124,9 @@ namespace CodexProSafeManager
             root.Controls.Add(tools, 0, 4);
 
             log.Dock = DockStyle.Fill;
-            log.ReadOnly = true;
             log.BackColor = Color.FromArgb(25, 25, 28);
             log.ForeColor = Color.Gainsboro;
-            log.BorderStyle = BorderStyle.FixedSingle;
             log.Font = new Font("Consolas", 8.5F);
-            log.DetectUrls = false;
             root.Controls.Add(log, 0, 5);
 
             Label footer = new Label
@@ -298,9 +295,7 @@ namespace CodexProSafeManager
         {
             BeginInvokeIfReady(delegate
             {
-                log.AppendText(String.Format("{0:T} [{1}] {2}{3}", DateTime.Now, source, message, Environment.NewLine));
-                log.SelectionStart = log.TextLength;
-                log.ScrollToCaret();
+                log.AppendLine(String.Format("{0:T} [{1}] {2}", DateTime.Now, source, message));
             });
         }
 
