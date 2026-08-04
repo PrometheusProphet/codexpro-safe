@@ -70,12 +70,72 @@ try {
   const afterHash = createHash('sha256').update(await fs.readFile(path.join(root, 'logs_synthetic.sqlite'))).digest('hex');
   assert.equal(afterHash, beforeHash, 'SQLite metadata operations must not modify runtime files');
 
+  const external = path.join(temp, 'external');
+  await fs.mkdir(path.join(external, 'outside-skill', 'outside-version'), { recursive: true });
+  const skillsPath = path.join(root, 'skills');
+  const skillsBackup = path.join(root, 'skills-before-race');
+  let extensionSwapComplete = false;
+  const racedExtensions = new CodexDiagnosticOperations({
+    rootForTest: root,
+    beforeExtensionEnumerationForTest: async (category) => {
+      if (category !== 'skills' || extensionSwapComplete) return;
+      extensionSwapComplete = true;
+      await fs.rename(skillsPath, skillsBackup);
+      await fs.symlink(external, skillsPath, process.platform === 'win32' ? 'junction' : 'dir');
+    }
+  });
+  const extensionRace = await racedExtensions.inventory();
+  const extensionRaceText = JSON.stringify(extensionRace);
+  assert.equal(extensionRace.status, 'unavailable');
+  assert.equal(extensionRaceText.includes('outside-skill'), false);
+  assert.equal(extensionRaceText.includes('outside-version'), false);
+  await fs.rm(skillsPath, { recursive: true, force: true });
+  await fs.rename(skillsBackup, skillsPath);
+
+  const configPath = path.join(root, 'config.toml');
+  const configBackup = path.join(root, 'config-before-race.toml');
+  const replacementConfig = path.join(external, 'replacement.toml');
+  await fs.writeFile(replacementConfig, '[general]\ntelemetry = false\n');
+  let configSwapComplete = false;
+  const racedConfiguration = new CodexDiagnosticOperations({
+    rootForTest: root,
+    beforeFixedFileReadForTest: async (kind) => {
+      if (kind !== 'configuration' || configSwapComplete) return;
+      configSwapComplete = true;
+      await fs.rename(configPath, configBackup);
+      await fs.copyFile(replacementConfig, configPath);
+    }
+  });
+  const configurationRace = await racedConfiguration.configurationSummary();
+  assert.equal(configurationRace.status, 'unavailable');
+  assert.equal(JSON.stringify(configurationRace).includes('false'), false);
+  await fs.rm(configPath);
+  await fs.rename(configBackup, configPath);
+
+  const databasePath = path.join(root, 'logs_synthetic.sqlite');
+  const databaseBackup = path.join(root, 'logs-before-race.sqlite');
+  const replacementDatabase = path.join(external, 'replacement.sqlite');
+  await fs.copyFile(databasePath, replacementDatabase);
+  let databaseSwapComplete = false;
+  const racedDatabase = new CodexDiagnosticOperations({
+    rootForTest: root,
+    beforeFixedFileReadForTest: async (kind) => {
+      if (kind !== 'database' || databaseSwapComplete) return;
+      databaseSwapComplete = true;
+      await fs.rename(databasePath, databaseBackup);
+      await fs.copyFile(replacementDatabase, databasePath);
+    }
+  });
+  const databaseRace = await racedDatabase.sqliteMetadata('logs', 'row_counts');
+  assert.equal(databaseRace.status, 'unavailable');
+  assert.equal(JSON.stringify(databaseRace).includes('logs_synthetic.sqlite'), false);
+  await fs.rm(databasePath);
+  await fs.rename(databaseBackup, databasePath);
+
   await fs.writeFile(path.join(root, 'logs_second.sqlite'), await fs.readFile(path.join(root, 'logs_synthetic.sqlite')));
   assert.equal((await diagnostics.sqliteMetadata('logs', 'summary')).status, 'ambiguous');
   await fs.rm(path.join(root, 'logs_second.sqlite'));
 
-  const external = path.join(temp, 'external');
-  await fs.mkdir(external);
   await fs.rm(path.join(root, 'skills'), { recursive: true });
   try {
     await fs.symlink(external, path.join(root, 'skills'), process.platform === 'win32' ? 'junction' : 'dir');

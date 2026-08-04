@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
-import type { Stats } from "node:fs";
+import type { Dirent, Stats } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,6 +34,10 @@ interface SafeEntry {
 export interface DiagnosticOperationsOptions {
   /** Internal test seam. Never exposed by connector configuration or MCP inputs. */
   rootForTest?: string;
+  /** Internal synthetic-race seam. Never invoked by production callers. */
+  beforeExtensionEnumerationForTest?: (category: "skills" | "plugins") => Promise<void> | void;
+  /** Internal synthetic-race seam. Never invoked by production callers. */
+  beforeFixedFileReadForTest?: (kind: "configuration" | "database") => Promise<void> | void;
 }
 
 function result(status: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -59,9 +64,80 @@ function withTimeout<T>(operation: Promise<T>): Promise<T> {
 }
 
 function isWindowsReparseOrLink(stat: Stats): boolean {
-  // Node's lstat reports Windows symbolic links and junctions as links. Canonical
-  // path checks below additionally reject any reparse-point escape that resolves elsewhere.
+  // Node's public lstat API identifies symbolic links and Windows junctions.
+  // Other reparse tags are not exposed as a stable Node >=20 classification, so
+  // containment and object-identity checks are required as a second boundary.
   return stat.isSymbolicLink();
+}
+
+function sameObject(expected: Stats, actual: Stats): boolean {
+  return expected.dev === actual.dev && expected.ino === actual.ino && expected.mode === actual.mode;
+}
+
+function sameSnapshot(expected: Stats, actual: Stats): boolean {
+  return sameObject(expected, actual) && expected.size === actual.size && expected.mtimeMs === actual.mtimeMs;
+}
+
+async function openBound(entry: SafeEntry): Promise<FileHandle> {
+  const before = await fs.lstat(entry.path);
+  if (isWindowsReparseOrLink(before) || !sameSnapshot(entry.stat, before)) throw new Error("identity changed");
+  const handle = await fs.open(entry.path, "r");
+  try {
+    const bound = await handle.stat();
+    const after = await fs.lstat(entry.path);
+    if (isWindowsReparseOrLink(after) || !sameSnapshot(entry.stat, bound) || !sameSnapshot(entry.stat, after)) {
+      throw new Error("identity changed");
+    }
+    return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+async function assertBound(entry: SafeEntry, handle: FileHandle): Promise<void> {
+  const bound = await handle.stat();
+  const current = await fs.lstat(entry.path);
+  if (isWindowsReparseOrLink(current) || !sameSnapshot(entry.stat, bound) || !sameSnapshot(entry.stat, current)) {
+    throw new Error("identity changed");
+  }
+}
+
+async function readBoundFile(entry: SafeEntry): Promise<Buffer> {
+  const handle = await openBound(entry);
+  try {
+    const content = await handle.readFile();
+    await assertBound(entry, handle);
+    return content;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function withBoundDirectory<T>(entry: SafeEntry, action: (children: Dirent[], handle: FileHandle) => Promise<T>): Promise<T> {
+  const handle = await openBound(entry);
+  let directory: Awaited<ReturnType<typeof fs.opendir>> | undefined;
+  try {
+    // Dir.read() enumerates through the opened directory object rather than a
+    // later pathname lookup. The separate FileHandle binds that directory to
+    // the identity captured during root validation.
+    directory = await fs.opendir(entry.path);
+    await assertBound(entry, handle);
+    const children: Dirent[] = [];
+    while (true) {
+      await assertBound(entry, handle);
+      const child = await directory.read();
+      if (!child) break;
+      children.push(child);
+    }
+    await assertBound(entry, handle);
+    const value = await action(children, handle);
+    await assertBound(entry, handle);
+    return value;
+  } finally {
+    await directory?.close();
+    await handle.close();
+  }
 }
 
 async function safeRoot(root: string): Promise<{ root: string; entries: SafeEntry[] } | undefined> {
@@ -70,7 +146,8 @@ async function safeRoot(root: string): Promise<{ root: string; entries: SafeEntr
     if (!rootStat.isDirectory() || isWindowsReparseOrLink(rootStat)) return undefined;
     const canonicalRoot = await fs.realpath(root);
     if (path.resolve(canonicalRoot) !== path.resolve(root)) return undefined;
-    const listed = await fs.readdir(root, { withFileTypes: true });
+    const rootEntry = { name: ".", path: root, stat: rootStat };
+    const listed = await withBoundDirectory(rootEntry, async (entries) => entries);
     const entries: SafeEntry[] = [];
     for (const item of listed) {
       const itemPath = path.join(root, item.name);
@@ -89,6 +166,12 @@ async function safeRoot(root: string): Promise<{ root: string; entries: SafeEntr
 
 function direct(entry: SafeEntry[], name: string): SafeEntry | undefined {
   return entry.find((candidate) => candidate.name === name);
+}
+
+function fixedChild(root: string, entries: SafeEntry[], name: string): SafeEntry | undefined {
+  const entry = direct(entries, name);
+  if (!entry || path.basename(entry.path) !== name) return undefined;
+  return { ...entry, path: path.join(root, name) };
 }
 
 function isSafeEntry(value: SafeEntry | Record<string, unknown>): value is SafeEntry {
@@ -127,30 +210,38 @@ function categorySummary(entries: SafeEntry[]): Record<string, unknown> {
   return categories;
 }
 
-async function installedExtensions(entries: SafeEntry[]): Promise<{ items: Record<string, unknown>[]; truncated: boolean }> {
+async function installedExtensions(
+  root: string,
+  entries: SafeEntry[],
+  beforeEnumerationForTest?: (category: "skills" | "plugins") => Promise<void> | void
+): Promise<{ status: "ok" | "unavailable"; items: Record<string, unknown>[]; truncated: boolean }> {
   const values: Record<string, unknown>[] = [];
   let truncated = false;
   for (const source of ["skills", "plugins"] as const) {
-    const category = direct(entries, source);
+    const category = fixedChild(root, entries, source);
     if (!category?.stat.isDirectory()) continue;
     try {
-      const children = await fs.readdir(category.path, { withFileTypes: true });
-      if (children.length > MAX_RECORDS - values.length) truncated = true;
-      for (const child of children.slice(0, MAX_RECORDS - values.length)) {
-        const childPath = path.join(category.path, child.name);
-        const stat = await fs.lstat(childPath);
-        if (!child.isDirectory() || isWindowsReparseOrLink(stat)) return { items: [], truncated: false };
-        const canonical = await fs.realpath(childPath);
-        if (path.dirname(canonical) !== await fs.realpath(category.path)) return { items: [], truncated: false };
-        const versionEntries = await fs.readdir(childPath, { withFileTypes: true });
-        const versions = versionEntries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
-        values.push({ name: child.name, source, version: versions.length === 1 ? versions[0] : "unknown", location: `${source}/${child.name}`, duplicate_version: versions.length > 1 });
-      }
+      await beforeEnumerationForTest?.(source);
+      await withBoundDirectory(category, async (children, categoryHandle) => {
+        if (children.length > MAX_RECORDS - values.length) truncated = true;
+        for (const child of children.slice(0, MAX_RECORDS - values.length)) {
+          await assertBound(category, categoryHandle);
+          const childPath = path.join(category.path, child.name);
+          if (path.dirname(path.resolve(childPath)) !== path.resolve(category.path)) throw new Error("child escaped parent");
+          const stat = await fs.lstat(childPath);
+          if (!child.isDirectory() || isWindowsReparseOrLink(stat)) throw new Error("unexpected child");
+          const childEntry = { name: child.name, path: childPath, stat };
+          const versionEntries = await withBoundDirectory(childEntry, async (entries) => entries);
+          await assertBound(category, categoryHandle);
+          const versions = versionEntries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+          values.push({ name: child.name, source, version: versions.length === 1 ? versions[0] : "unknown", location: `${source}/${child.name}`, duplicate_version: versions.length > 1 });
+        }
+      });
     } catch {
-      return { items: [], truncated: false };
+      return { status: "unavailable", items: [], truncated: false };
     }
   }
-  return { items: values, truncated };
+  return { status: "ok", items: values, truncated };
 }
 
 const ALLOWED_CONFIG: Record<string, Record<string, { type: "boolean" | "integer" | "enum"; values?: readonly string[] }>> = {
@@ -213,21 +304,26 @@ function totalTableCount(database: SqlDatabase): number {
   return Number(exec(database, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")[0]?.[0] ?? 0);
 }
 
-async function selectedDatabase(entries: SafeEntry[], familyKind: DiagnosticFamilyKind): Promise<SafeEntry | Record<string, unknown>> {
+async function selectedDatabase(root: string, entries: SafeEntry[], familyKind: DiagnosticFamilyKind): Promise<SafeEntry | Record<string, unknown>> {
   const matches = databaseEntries(entries).filter((entry) => FAMILY_PATTERNS[familyKind].test(entry.name));
   if (!matches.length) return result("missing", { family_kind: familyKind });
   if (matches.length !== 1) return result("ambiguous", { family_kind: familyKind, matches: matches.length });
   if (matches[0].stat.size > MAX_DATABASE_BYTES) return result("unavailable", { family_kind: familyKind, reason: "database exceeds diagnostic size limit" });
-  const current = await fs.lstat(matches[0].path);
+  const selected = { ...matches[0], path: path.join(root, matches[0].name) };
+  const current = await fs.lstat(selected.path);
   if (!current.isFile() || isWindowsReparseOrLink(current) || current.size !== matches[0].stat.size) return safeFailure();
-  return matches[0];
+  return selected;
 }
 
 export class CodexDiagnosticOperations {
   private readonly root: string;
+  private readonly beforeExtensionEnumerationForTest?: DiagnosticOperationsOptions["beforeExtensionEnumerationForTest"];
+  private readonly beforeFixedFileReadForTest?: DiagnosticOperationsOptions["beforeFixedFileReadForTest"];
 
   constructor(options: DiagnosticOperationsOptions = {}) {
     this.root = options.rootForTest ?? path.join(os.homedir(), ".codex");
+    this.beforeExtensionEnumerationForTest = options.beforeExtensionEnumerationForTest;
+    this.beforeFixedFileReadForTest = options.beforeFixedFileReadForTest;
   }
 
   async inventory(): Promise<Record<string, unknown>> {
@@ -238,9 +334,16 @@ export class CodexDiagnosticOperations {
     const root = await safeRoot(this.root);
     if (!root) return safeFailure();
     if (!root.entries.length) return result("missing", { categories: categorySummary([]), process_locks: { status: "unavailable" } });
-    const extensions = await installedExtensions(root.entries);
-    if (!extensions.items.length && ["skills", "plugins"].some((name) => direct(root.entries, name)?.stat.isDirectory())) return safeFailure();
+    const extensions = await installedExtensions(root.root, root.entries, this.beforeExtensionEnumerationForTest);
     const databases = databaseMetadata(root.entries);
+    if (extensions.status === "unavailable") {
+      return result("unavailable", {
+        categories: categorySummary(root.entries),
+        databases: databases.items,
+        installed_extensions: { status: "unavailable" },
+        process_locks: { status: "unavailable" }
+      });
+    }
     return result("ok", { categories: categorySummary(root.entries), databases: databases.items, installed_extensions: extensions.items, truncated: databases.truncated || extensions.truncated, process_locks: { status: "unavailable" } });
   }
 
@@ -254,13 +357,11 @@ export class CodexDiagnosticOperations {
     if (!root.entries.length) return result("missing", { files: [] });
     const files: Record<string, unknown>[] = [];
     for (const name of CONFIG_FILES) {
-      const entry = direct(root.entries, name);
+      const entry = fixedChild(root.root, root.entries, name);
       if (!entry) { files.push({ config_file: name, status: "absent" }); continue; }
       if (!entry.stat.isFile() || entry.stat.size > MAX_RESPONSE_BYTES) return safeFailure();
-      const before = await fs.lstat(entry.path);
-      const content = await fs.readFile(entry.path, "utf8");
-      const after = await fs.lstat(entry.path);
-      if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || isWindowsReparseOrLink(after)) return safeFailure();
+      await this.beforeFixedFileReadForTest?.("configuration");
+      const content = (await readBoundFile(entry)).toString("utf8");
       files.push({ config_file: name, status: "present", ...parseConfiguration(content) });
     }
     return result("ok", { files });
@@ -273,15 +374,14 @@ export class CodexDiagnosticOperations {
   private async sqliteMetadataInner(familyKind: DiagnosticFamilyKind, operation: DiagnosticSqliteOperation): Promise<Record<string, unknown>> {
     const root = await safeRoot(this.root);
     if (!root) return safeFailure();
-    const selected = await selectedDatabase(root.entries, familyKind);
+    const selected = await selectedDatabase(root.root, root.entries, familyKind);
     if (!isSafeEntry(selected)) return selected;
     let database: SqlDatabase | undefined;
     try {
       // sql.js constructs SQLite from this immutable read buffer only; it never opens
       // the runtime file path, so SQLite cannot checkpoint, journal, or mutate it.
-      const bytes = await fs.readFile(selected.path);
-      const current = await fs.lstat(selected.path);
-      if (!current.isFile() || current.size !== selected.stat.size || current.mtimeMs !== selected.stat.mtimeMs) return safeFailure();
+      await this.beforeFixedFileReadForTest?.("database");
+      const bytes = await readBoundFile(selected);
       database = new (await sqlite()).Database(bytes);
       const tables = tableNames(database);
       const totalTables = totalTableCount(database);
