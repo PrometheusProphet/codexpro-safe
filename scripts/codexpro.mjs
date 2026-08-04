@@ -17,6 +17,7 @@ const DEFAULT_BASH = 'off';
 const DEFAULT_WRITE = 'handoff';
 const DEFAULT_TOOL_MODE = 'standard';
 const DEFAULT_TOOL_CARD_MODE = 'off';
+const DEFAULT_CODEX_DIAGNOSTIC_READ = 'off';
 const DEFAULT_WIDGET_DOMAIN = 'https://rebel0789.github.io';
 
 function usage() {
@@ -67,6 +68,8 @@ Options:
   --tool-card-mode <off|compact>
                              Custom ChatGPT HTML tool cards. Default: off.
                              compact = advertise the bundled Apps SDK card resource.
+  --codex-diagnostic-read <off|read>
+                             Fixed-root, metadata-only Codex runtime diagnostics. Default: off.
   --widget-domain <origin>   Dedicated HTTPS origin for ChatGPT widget iframes.
                              Used when compact cards are enabled. Default: https://rebel0789.github.io.
   --tunnel <none|cloudflare|cloudflare-named|ngrok>
@@ -1488,7 +1491,7 @@ function printConnectorBlock(endpoint, token, options = {}) {
   console.log('');
   console.log(paint('bold', 'CodexPro ready'));
   if (options.root) console.log(`  Workspace  ${options.root}`);
-  console.log(`  Mode       ${modeTitle}  tools=${options.toolMode ?? DEFAULT_TOOL_MODE}  cards=${toolCardMode}  write=${options.write ?? DEFAULT_WRITE}  bash=${options.bash ?? DEFAULT_BASH}`);
+  console.log(`  Mode       ${modeTitle}  tools=${options.toolMode ?? DEFAULT_TOOL_MODE}  cards=${toolCardMode}  write=${options.write ?? DEFAULT_WRITE}  bash=${options.bash ?? DEFAULT_BASH}  diagnostics=${options.codexDiagnosticRead ?? DEFAULT_CODEX_DIAGNOSTIC_READ}`);
   console.log(`  Connector  ${publicHttps ? 'public HTTPS' : 'local HTTP'}`);
   if (token && !options.allowQueryToken) {
     console.log('  Auth       Authorization: Bearer <token>');
@@ -1613,6 +1616,7 @@ async function runDoctor(argv) {
   const bash = optionValue(args, profile, 'bash', ['CODEXPRO_BASH_MODE'], DEFAULT_BASH);
   const write = optionValue(args, profile, 'write', ['CODEXPRO_WRITE_MODE'], DEFAULT_WRITE);
   const toolMode = optionValue(args, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], DEFAULT_TOOL_MODE);
+  const codexDiagnosticRead = optionValue(args, profile, 'codexDiagnosticRead', ['CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE'], DEFAULT_CODEX_DIAGNOSTIC_READ);
   const stableHostname = args.hostname
     ?? args.url
     ?? process.env.CODEXPRO_PUBLIC_HOSTNAME
@@ -1637,7 +1641,7 @@ async function runDoctor(argv) {
   console.log('');
   printBox('CodexPro doctor', [
     labelValue('Workspace', root),
-    labelValue('Mode', `${mode}  tools=${toolMode}  write=${write}  bash=${bash}`),
+    labelValue('Mode', `${mode}  tools=${toolMode}  write=${write}  bash=${bash}  diagnostics=${codexDiagnosticRead}`),
     labelValue('Tunnel', tunnel),
     ...(stableHostname ? [labelValue('Hostname', stableHostname)] : []),
     ...(profile.profilePath ? [labelValue('Profile', profile.profilePath)] : [])
@@ -2395,11 +2399,13 @@ async function main() {
   const bash = optionValue(args, profile, 'bash', ['CODEXPRO_BASH_MODE'], DEFAULT_BASH);
   const write = optionValue(args, profile, 'write', ['CODEXPRO_WRITE_MODE'], DEFAULT_WRITE);
   const toolMode = optionValue(args, profile, 'toolMode', ['CODEXPRO_TOOL_MODE'], DEFAULT_TOOL_MODE);
+  const codexDiagnosticRead = optionValue(args, profile, 'codexDiagnosticRead', ['CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE'], DEFAULT_CODEX_DIAGNOSTIC_READ);
   const toolCardMode = optionValue(args, profile, 'toolCardMode', ['CODEXPRO_TOOL_CARD_MODE'], DEFAULT_TOOL_CARD_MODE);
   const widgetDomain = optionValue(args, profile, 'widgetDomain', ['CODEXPRO_WIDGET_DOMAIN'], DEFAULT_WIDGET_DOMAIN);
   if (!['off', 'safe', 'full'].includes(bash)) throw new Error('--bash must be off, safe, or full');
   if (!['off', 'handoff', 'workspace'].includes(write)) throw new Error('--write must be off, handoff, or workspace');
   if (!['minimal', 'standard', 'full'].includes(toolMode)) throw new Error('--tool-mode must be minimal, standard, or full');
+  if (!['off', 'read'].includes(codexDiagnosticRead)) throw new Error('--codex-diagnostic-read must be off or read');
   if (!['off', 'compact'].includes(toolCardMode)) throw new Error('--tool-card-mode must be off or compact');
 
   let token = args.noAuth ? '' : optionValue(args, profile, 'token', ['CODEXPRO_HTTP_TOKEN', 'CODEBASE_BRIDGE_HTTP_TOKEN'], '');
@@ -2416,6 +2422,7 @@ async function main() {
     CODEXPRO_WRITE_MODE: write,
     CODEXPRO_TOOL_MODE: toolMode,
     CODEXPRO_TOOL_CARD_MODE: toolCardMode,
+    CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE: codexDiagnosticRead,
     CODEXPRO_WIDGET_DOMAIN: widgetDomain,
     CODEXPRO_MODE: mode,
     CODEXPRO_TUNNEL_MODE: tunnel === 'none' ? '0' : '1',
@@ -2439,7 +2446,7 @@ async function main() {
 
   printBox('CodexPro start', [
     labelValue('Workspace', root),
-    labelValue('Mode', `${mode}  tools=${toolMode}  cards=${toolCardMode}  write=${write}  bash=${bash}`),
+    labelValue('Mode', `${mode}  tools=${toolMode}  cards=${toolCardMode}  write=${write}  bash=${bash}  diagnostics=${codexDiagnosticRead}`),
     labelValue('Local URL', `http://${host}:${port}/mcp`),
     labelValue(
       'Tunnel',
@@ -2477,6 +2484,7 @@ async function main() {
       mode,
       toolMode,
       toolCardMode,
+      codexDiagnosticRead,
       root,
       write,
       bash,
@@ -2517,6 +2525,7 @@ async function main() {
       mode,
       toolMode,
       toolCardMode,
+      codexDiagnosticRead,
       root,
       write,
       bash,
@@ -2538,6 +2547,7 @@ async function main() {
       mode,
       toolMode,
       toolCardMode,
+      codexDiagnosticRead,
       root,
       write,
       bash,
@@ -2623,6 +2633,7 @@ async function main() {
     mode,
     toolMode,
     toolCardMode,
+    codexDiagnosticRead,
     root,
     write,
     bash,

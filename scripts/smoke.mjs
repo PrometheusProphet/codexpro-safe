@@ -5,10 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 function commandExists(command) {
-  const result = spawnSync(process.platform === 'win32' ? 'where' : 'command', process.platform === 'win32' ? [command] : ['-v', command], {
-    shell: process.platform !== 'win32',
-    stdio: 'ignore'
-  });
+  // `where bash` can find the Windows WSL relay even when no runnable Linux
+  // distribution exists. Probe the executable itself so this smoke test takes
+  // the disabled-bash path in that bounded environment.
+  const result = spawnSync(command, ['--version'], { stdio: 'ignore', windowsHide: true });
   return result.status === 0;
 }
 

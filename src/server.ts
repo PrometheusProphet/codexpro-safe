@@ -16,6 +16,7 @@ import { TOOL_CARD_MIME_TYPE, TOOL_CARD_URI, toolCardWidgetHtml } from "./toolCa
 import { redactSensitiveText, redactStructured } from "./redact.js";
 import { savePromptFile } from "./promptFileOps.js";
 import { runtimeBuildInfo } from "./buildInfo.js";
+import { CodexDiagnosticOperations } from "./diagnosticOps.js";
 
 const RUNTIME_BUILD_INFO = runtimeBuildInfo(import.meta.url);
 
@@ -144,7 +145,8 @@ function sanitizedCallDetails(
     mode: {
       toolMode: config.toolMode,
       writeMode: config.writeMode,
-      bashMode: config.bashMode
+      bashMode: config.bashMode,
+      codexDiagnosticReadMode: config.codexDiagnosticReadMode
     },
     server_completed: true
   };
@@ -320,6 +322,7 @@ const FULL_TOOL_NAMES = [
 ] as const;
 
 const ADVANCED_STANDARD_TOOL_NAMES = ["read", "write", "edit", "bash"] as const;
+const CODEX_DIAGNOSTIC_TOOL_NAMES = ["codex_diagnostic_inventory", "codex_diagnostic_config_summary", "codex_diagnostic_sqlite_metadata"] as const;
 
 interface HiddenTool {
   name: string;
@@ -340,7 +343,12 @@ function uniqueToolNames(names: readonly string[]): string[] {
 }
 
 function toolExposureForMode(config: CodexProConfig): ToolExposure {
-  if (config.toolMode === "full") return { effectiveTools: uniqueToolNames(FULL_TOOL_NAMES), hiddenTools: [] };
+  if (config.toolMode === "full") {
+    const effectiveTools = config.codexDiagnosticReadMode === "read"
+      ? uniqueToolNames([...FULL_TOOL_NAMES, ...CODEX_DIAGNOSTIC_TOOL_NAMES])
+      : uniqueToolNames(FULL_TOOL_NAMES);
+    return { effectiveTools, hiddenTools: [] };
+  }
 
   const base = config.toolMode === "minimal" ? [...MINIMAL_TOOL_NAMES] : [...STANDARD_TOOL_NAMES];
   const effective = new Set<string>(base);
@@ -377,6 +385,10 @@ function toolExposureForMode(config: CodexProConfig): ToolExposure {
     }
   }
 
+  if (config.codexDiagnosticReadMode === "read") {
+    for (const name of CODEX_DIAGNOSTIC_TOOL_NAMES) effective.add(name);
+  }
+
   return {
     effectiveTools: uniqueToolNames([...effective]),
     hiddenTools
@@ -411,7 +423,7 @@ function serverInstructions(config: CodexProConfig): string {
     "5. Use bash only for meaningful verification commands such as npm test, npm run build, lint, typecheck, or an existing project script.",
     "6. Keep tool calls minimal. Prefer one targeted search plus show_changes instead of repeated broad bash/git calls.",
     "",
-    `Current modes: tool=${config.toolMode}, bash=${config.bashMode}, write=${config.writeMode}.`
+    `Current modes: tool=${config.toolMode}, bash=${config.bashMode}, write=${config.writeMode}, codex_diagnostic_read=${config.codexDiagnosticReadMode}.`
   ].join("\n");
 }
 
@@ -703,6 +715,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     { instructions: serverInstructions(config) }
   );
   registerToolCardResource(server, config);
+  const diagnostics = config.codexDiagnosticReadMode === "read" ? new CodexDiagnosticOperations() : undefined;
 
   registerCodexTool(
     config,
@@ -737,6 +750,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         writeMode: config.writeMode,
         toolMode: config.toolMode,
         toolCardMode: config.toolCardMode,
+        codexDiagnosticReadMode: config.codexDiagnosticReadMode,
         inheritEnv: config.inheritEnv,
         contextDir: config.contextDir,
         maxReadBytes: config.maxReadBytes,
@@ -780,6 +794,51 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     }
   );
 
+  if (diagnostics) {
+    registerToolCompat(
+      config,
+      server,
+      "codex_diagnostic_inventory",
+      {
+        title: "Codex Diagnostic Inventory",
+        description: "Read a bounded, metadata-only inventory of the current user's Codex runtime. It has no path input and cannot inspect workspace files, transcripts, or log content.",
+        inputSchema: {},
+        annotations: READ_ONLY_ANNOTATIONS,
+        _meta: { ...toolCardMeta(config), "openai/toolInvocation/invoking": "Reading Codex diagnostic inventory...", "openai/toolInvocation/invoked": "Codex diagnostic inventory ready" }
+      },
+      async () => textResult("# Codex Diagnostic Inventory\n\nMetadata-only diagnostic completed.", await diagnostics.inventory())
+    );
+    registerToolCompat(
+      config,
+      server,
+      "codex_diagnostic_config_summary",
+      {
+        title: "Codex Diagnostic Configuration Summary",
+        description: "Read a typed, allowlisted summary of fixed Codex configuration files. Values outside the allowlist are omitted.",
+        inputSchema: {},
+        annotations: READ_ONLY_ANNOTATIONS,
+        _meta: { ...toolCardMeta(config), "openai/toolInvocation/invoking": "Reading Codex configuration summary...", "openai/toolInvocation/invoked": "Codex configuration summary ready" }
+      },
+      async () => textResult("# Codex Diagnostic Configuration Summary\n\nTyped allowlist summary completed.", await diagnostics.configurationSummary())
+    );
+    registerToolCompat(
+      config,
+      server,
+      "codex_diagnostic_sqlite_metadata",
+      {
+        title: "Codex Diagnostic SQLite Metadata",
+        description: "Read bounded metadata from one fixed Codex database family using a read-only in-memory copy. No filename or SQL input is accepted.",
+        inputSchema: {
+          family_kind: z.enum(["logs", "state", "memories", "goals"]),
+          operation: z.enum(["summary", "integrity_check", "storage_metadata", "schema", "row_counts", "timestamp_ranges"])
+        },
+        annotations: READ_ONLY_ANNOTATIONS,
+        _meta: { ...toolCardMeta(config), "openai/toolInvocation/invoking": "Reading Codex SQLite metadata...", "openai/toolInvocation/invoked": "Codex SQLite metadata ready" }
+      },
+      async (args) => textResult("# Codex Diagnostic SQLite Metadata\n\nMetadata-only database diagnostic completed.", await diagnostics.sqliteMetadata(args.family_kind, args.operation))
+    );
+  }
+
   registerCodexTool(
     config,
     server,
@@ -819,6 +878,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       check("tool mode", config.toolMode === "full" ? "pass" : "warn", `${config.toolMode}; effective tools: ${exposure.effectiveTools.length}`);
       check("write mode", config.writeMode === "off" ? "warn" : "pass", config.writeMode);
       check("bash mode", config.bashMode === "full" ? "warn" : "pass", config.bashMode);
+      check("codex diagnostic read mode", "pass", config.codexDiagnosticReadMode);
       check(
         "http auth",
         config.requireHttpToken && !config.authToken ? "fail" : "pass",

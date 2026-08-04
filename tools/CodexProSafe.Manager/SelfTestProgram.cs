@@ -10,21 +10,26 @@ namespace CodexProSafeManager
             try
             {
                 AppSettings settings = AppSettings.CreateDefaults();
+                Assert(settings.CodexDiagnosticReadMode == "off", "diagnostic default");
                 settings.RepositoryPath = @"C:\repo with spaces\codexpro-safe";
                 settings.WorkspaceRoot = @"C:\Users\test\Projects";
                 settings.AllowedRoot = @"C:\Users\test\Projects";
                 settings.TunnelProfile = "codexpro-safe-local";
+                settings.CodexDiagnosticReadMode = "read";
 
                 string connector = ProcessSupervisor.BuildConnectorArguments(settings);
                 Assert(connector.Contains("\"C:\\repo with spaces\\codexpro-safe\\scripts\\codexpro.mjs\""), "connector script quoting");
                 Assert(connector.Contains("--mode handoff"), "handoff mode");
                 Assert(connector.Contains("--bash off"), "bash mode");
                 Assert(connector.Contains("--write handoff"), "write mode");
+                Assert(connector.Contains("--codex-diagnostic-read read"), "diagnostic read mode");
                 Assert(ProcessSupervisor.BuildTunnelArguments(settings) == "run --profile \"codexpro-safe-local\"", "tunnel profile");
                 Assert(ProcessSupervisor.ContainsArgument(
-                    "node scripts\\codexpro.mjs --root \"C:\\Users\\test\\Projects\" --allow-root \"C:\\Users\\test\\Projects\" --tunnel none --mode handoff",
+                    "node scripts\\codexpro.mjs --root \"C:\\Users\\test\\Projects\" --allow-root \"C:\\Users\\test\\Projects\" --tunnel none --mode handoff --bash off --write handoff --codex-diagnostic-read read",
                     "--root",
                     @"C:\Users\test\Projects"), "takeover root matching");
+                Assert(ProcessSupervisor.ContainsArgument(connector, "--codex-diagnostic-read", "read"), "takeover diagnostic matching");
+                Assert(!ProcessSupervisor.ContainsArgument(connector, "--codex-diagnostic-read", "off"), "takeover diagnostic mismatch");
 
                 string secret = "fake-redaction-secret-value-123456789";
                 string sanitized = LogWriter.Sanitize("api_key=" + secret + " Authorization: Bearer " + secret);

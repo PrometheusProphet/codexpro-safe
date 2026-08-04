@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added the opt-in `off`/`read` Codex diagnostic runtime profile. Its
+  fixed-input tools provide bounded metadata-only inventory, typed
+  configuration summary, and SQLite metadata through an in-memory read copy;
+  the profile neither adds generic home access nor enables maintenance actions.
+- Added the matching CodexPro-Safe Manager setting, connector argument, and
+  fail-closed external-process ownership check.
 - Made `save_prompt_file` compute the authoritative `promptHash` from the exact persisted UTF-8 prompt bytes, complete and validate a non-mutating internal manifest copy, and replace omitted, stale, or malformed legacy caller hashes without weakening any other product-contract checks.
 - Fixed `product-contract-v1` to compare complete semantic result identity and reject malformed or kind-incompatible structured results, preventing false rejections of valid same-kind repairs.
 - Added source-checkout build freshness checks, HTTP regression coverage for manifested prompt saves, and runtime build identity in `server_config` so stale compiled tool schemas fail visibly instead of running silently.

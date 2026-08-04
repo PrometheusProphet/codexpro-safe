@@ -47,7 +47,8 @@ namespace CodexProSafeManager
                 "--tunnel", "none",
                 "--mode", "handoff",
                 "--bash", "off",
-                "--write", "handoff"
+                "--write", "handoff",
+                "--codex-diagnostic-read", value.CodexDiagnosticReadMode
             });
         }
 
@@ -332,6 +333,9 @@ namespace CodexProSafeManager
             if (!ContainsArgument(parent.CommandLine, "--allow-root", settings.AllowedRoot)) return -1;
             if (!ContainsArgument(parent.CommandLine, "--tunnel", "none")) return -1;
             if (!ContainsArgument(parent.CommandLine, "--mode", "handoff")) return -1;
+            if (!ContainsArgument(parent.CommandLine, "--bash", "off")) return -1;
+            if (!ContainsArgument(parent.CommandLine, "--write", "handoff")) return -1;
+            if (!ContainsArgument(parent.CommandLine, "--codex-diagnostic-read", settings.CodexDiagnosticReadMode)) return -1;
             return parent.ProcessId;
         }
 

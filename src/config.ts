@@ -6,6 +6,7 @@ export type BashMode = "off" | "safe" | "full";
 export type WriteMode = "off" | "handoff" | "workspace";
 export type ToolMode = "minimal" | "standard" | "full";
 export type ToolCardMode = "off" | "compact";
+export type CodexDiagnosticReadMode = "off" | "read";
 
 export interface CodexProConfig {
   defaultRoot: string;
@@ -22,6 +23,7 @@ export interface CodexProConfig {
   writeMode: WriteMode;
   toolMode: ToolMode;
   toolCardMode: ToolCardMode;
+  codexDiagnosticReadMode: CodexDiagnosticReadMode;
   inheritEnv: boolean;
   maxReadBytes: number;
   maxWriteBytes: number;
@@ -192,6 +194,12 @@ function toolCardModeFrom(value: string | undefined): ToolCardMode {
   return "off";
 }
 
+function codexDiagnosticReadModeFrom(value: string | undefined): CodexDiagnosticReadMode {
+  if (value === undefined) return "off";
+  if (value === "off" || value === "read") return value;
+  throw new Error("CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE must be off or read.");
+}
+
 function widgetDomainFrom(value: string | undefined): string {
   const raw = value?.trim() || "https://rebel0789.github.io";
   let parsed: URL;
@@ -277,6 +285,7 @@ export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
   const writeArg = typeof args.write === "string" ? args.write : undefined;
   const toolModeArg = typeof args["tool-mode"] === "string" ? args["tool-mode"] : undefined;
   const toolCardModeArg = typeof args["tool-card-mode"] === "string" ? args["tool-card-mode"] : undefined;
+  const diagnosticReadModeArg = typeof args["codex-diagnostic-read"] === "string" ? args["codex-diagnostic-read"] : undefined;
   const widgetDomainArg = typeof args["widget-domain"] === "string" ? args["widget-domain"] : undefined;
   const extraBlockedGlobs = splitList(process.env.CODEXPRO_BLOCKED_GLOBS, ",");
   const host = hostArg ?? process.env.HOST ?? process.env.CODEXPRO_HOST ?? "127.0.0.1";
@@ -305,6 +314,7 @@ export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
     writeMode: writeModeFrom(writeArg ?? process.env.CODEXPRO_WRITE_MODE),
     toolMode: toolModeFrom(toolModeArg ?? process.env.CODEXPRO_TOOL_MODE),
     toolCardMode: toolCardModeFrom(toolCardModeArg ?? process.env.CODEXPRO_TOOL_CARD_MODE),
+    codexDiagnosticReadMode: codexDiagnosticReadModeFrom(diagnosticReadModeArg ?? process.env.CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE),
     inheritEnv: process.env.CODEXPRO_INHERIT_ENV === "1",
     maxReadBytes: numberFrom(process.env.CODEXPRO_MAX_READ_BYTES, 180_000, 4_000, 2_000_000),
     maxWriteBytes: numberFrom(process.env.CODEXPRO_MAX_WRITE_BYTES, 1_000_000, 1_000, 10_000_000),

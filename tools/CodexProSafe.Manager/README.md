@@ -10,7 +10,7 @@ troubleshooting instructions, see
 It preserves the verified connector launch contract:
 
 ```text
-node scripts/codexpro.mjs --root <workspace-root> --allow-root <allowed-root> --tunnel none --mode handoff --bash off --write handoff
+node scripts/codexpro.mjs --root <workspace-root> --allow-root <allowed-root> --tunnel none --mode handoff --bash off --write handoff --codex-diagnostic-read <off|read>
 ```
 
 The tunnel client uses the existing `codexpro-safe-local` profile. Its API key
@@ -56,7 +56,11 @@ tools\CodexProSafe.Manager\bin\CodexProSafe.Manager.exe
 
 The takeover is fail-closed. The manager refuses to stop an external process
 unless the listener, executable/profile, command line, workspace root, allowed
-root, tunnel mode, and handoff mode match.
+root, tunnel mode, handoff mode, and saved Codex diagnostic mode match.
+
+Codex diagnostics default to **Off**. **Read-only** enables only fixed-root,
+metadata-only diagnostics and does not grant generic home/runtime access or any
+maintenance action. A setting change takes effect through **Restart All**.
 
 After takeover, use **Start All**, **Restart All**, and **Stop All** from either
 the main window or the notification-area menu. Closing the window minimizes it.

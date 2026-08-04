@@ -1086,6 +1086,31 @@ Use the MCP `read` and `search` tools for file contents. The safe shell blocks o
 
 `CODEXPRO_BASH_MODE=full` allows arbitrary shell commands. Use this only for trusted local repos; MCP itself is not an OS sandbox.
 
+## Codex runtime diagnostic read profile
+
+`CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE=off` is the default. Set it to `read`, or
+launch with `--codex-diagnostic-read read`, only when you need the three
+purpose-built metadata diagnostics for the current user's Codex runtime.
+
+```bash
+codexpro start --codex-diagnostic-read read
+```
+
+The profile does not add the user home or Codex runtime directory to workspace
+roots, generic read/search/tree/bash/SQLite/write, or handoff access. It only
+registers fixed-input tools for a shallow inventory, typed configuration
+presence summary, and fixed SQLite metadata operations. The tools reject links,
+path escapes, unexpected types, ambiguous database families, and unsafe races;
+their responses are bounded and omit configuration strings, paths, transcript
+names, logs, row values, SQL, and identifiers.
+
+The SQLite implementation reads a bounded database file into an in-memory
+`sql.js` copy and never opens the runtime database for SQLite file access, so it
+cannot checkpoint, journal, or modify the runtime file. Synthetic temporary
+homes and databases cover this contract; this is not evidence about a live
+Codex runtime, process lock, or Manager installation. Maintenance is not part
+of this profile.
+
 By default the bash environment is sanitized. To inherit your full local environment:
 
 ```bash

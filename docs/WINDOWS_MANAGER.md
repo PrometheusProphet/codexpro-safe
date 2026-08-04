@@ -67,6 +67,9 @@ Open **Settings** and confirm:
 - **Control Plane API key** — a runtime OpenAI API key copied when it was
   created.
 - **Organization ID** — the `org-...` identifier that owns the tunnel.
+- **Codex diagnostics** — **Off** by default. **Read-only** enables only the
+  fixed-root, metadata-only Codex diagnostic profile; it does not add the home
+  directory to workspace access or enable generic runtime reads.
 
 For least privilege, create a restricted runtime API key and enable only
 **Tunnels → All selected**. The secret value is shown only once by OpenAI. The
@@ -82,6 +85,13 @@ account with DPAPI and stores it at:
 ```text
 %LOCALAPPDATA%\CodexProSafe Manager\settings.dat
 ```
+
+Changing Codex diagnostics takes effect only after the existing controlled
+connector restart. The Manager includes its saved `off`/`read` value in the
+connector arguments and refuses external-process takeover when it does not
+match. Read-only diagnostics are synthetic-test coverage only; they do not
+verify or inspect this user's live runtime during installation, and maintenance
+operations are not part of the setting.
 
 Logs are redacted and stored under:
 

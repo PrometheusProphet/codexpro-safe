@@ -18,6 +18,7 @@ namespace CodexProSafeManager
         public bool StartMinimized { get; set; }
         public bool AutoStartServices { get; set; }
         public bool RestartOnFailure { get; set; }
+        public string CodexDiagnosticReadMode { get; set; }
 
         public static AppSettings CreateDefaults()
         {
@@ -38,7 +39,8 @@ namespace CodexProSafeManager
                 StartWithWindows = false,
                 StartMinimized = false,
                 AutoStartServices = false,
-                RestartOnFailure = true
+                RestartOnFailure = true,
+                CodexDiagnosticReadMode = "off"
             };
         }
 
@@ -53,6 +55,7 @@ namespace CodexProSafeManager
             if (String.IsNullOrWhiteSpace(TunnelProfile)) TunnelProfile = defaults.TunnelProfile;
             if (ControlPlaneApiKey == null) ControlPlaneApiKey = String.Empty;
             if (OrganizationId == null) OrganizationId = String.Empty;
+            if (String.IsNullOrWhiteSpace(CodexDiagnosticReadMode)) CodexDiagnosticReadMode = "off";
         }
 
         public string ValidateForConnector()
@@ -65,6 +68,8 @@ namespace CodexProSafeManager
                 return "dist\\http.js is missing. Run npm.cmd run build in the repository.";
             if (!Directory.Exists(WorkspaceRoot)) return "Workspace root was not found at " + WorkspaceRoot;
             if (!Directory.Exists(AllowedRoot)) return "Allowed root was not found at " + AllowedRoot;
+            if (CodexDiagnosticReadMode != "off" && CodexDiagnosticReadMode != "read")
+                return "Codex diagnostic read mode must be off or read.";
             return null;
         }
 
