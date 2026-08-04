@@ -730,11 +730,50 @@ async function assertPortAvailable(host, port) {
   });
 }
 
+async function awaitManagerDiagnosticGate(codexDiagnosticRead) {
+  const proofPipe = process.env.CODEXPRO_DIAGNOSTIC_MANAGER_PIPE?.trim() ?? '';
+  if (codexDiagnosticRead !== 'read' || !proofPipe) return;
+  const gate = process.env.CODEXPRO_DIAGNOSTIC_MANAGER_GATE?.trim() ?? '';
+  if (!/^codexpro-safe-diagnostic-gate-[a-f0-9]{32}$/.test(gate)) {
+    throw new Error('Manager diagnostic launch gate unavailable.');
+  }
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    let received = Buffer.alloc(0);
+    const socket = net.createConnection(`\\\\.\\pipe\\${gate}`);
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => finish(new Error('Manager diagnostic launch gate timed out.')), 5000);
+    socket.on('data', (chunk) => {
+      received = Buffer.concat([received, chunk]);
+      if (received.length > 64) {
+        finish(new Error('Manager diagnostic launch gate rejected.'));
+      } else if (received.length === 64 && /^[a-f0-9]{64}$/.test(received.toString('ascii'))) {
+        const capability = received.toString('ascii');
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        socket.destroy();
+        resolve(capability);
+      }
+    });
+    socket.once('error', () => finish(new Error('Manager diagnostic launch gate unavailable.')));
+    socket.once('end', () => finish(new Error('Manager diagnostic launch gate closed.')));
+  });
+}
+
 const spawnedChildren = new Set();
 
 function spawnLogged(name, command, args, options = {}) {
-  const { verbose = false, ...spawnOptions } = options;
-  const child = spawn(command, args, { ...spawnOptions, stdio: ['ignore', 'pipe', 'pipe'] });
+  const { verbose = false, stdinPayload, ...spawnOptions } = options;
+  const child = spawn(command, args, { ...spawnOptions, stdio: [stdinPayload ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+  if (stdinPayload) child.stdin.end(stdinPayload);
   const logLines = [];
   const record = (stream, chunk) => {
     const text = String(chunk);
@@ -2462,7 +2501,13 @@ async function main() {
 
   const verboseLogs = Boolean(args.logRequests || process.env.CODEXPRO_LOG_REQUESTS === '1');
   statusLine('wait', 'Starting local MCP server');
-  const server = spawnLogged('codexpro', process.execPath, [httpPath], { cwd: projectRoot, env: serverEnv, verbose: verboseLogs });
+  const managerLaunchCapability = await awaitManagerDiagnosticGate(codexDiagnosticRead);
+  const server = spawnLogged('codexpro', process.execPath, [httpPath], {
+    cwd: projectRoot,
+    env: serverEnv,
+    verbose: verboseLogs,
+    stdinPayload: managerLaunchCapability
+  });
   let cloudflared;
   const cleanup = cleanupChildren;
   process.on('SIGINT', () => { cleanup(); process.exit(130); });

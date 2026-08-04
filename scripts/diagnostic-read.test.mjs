@@ -13,12 +13,26 @@ const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-safe-diagnostic-'
 try {
   const defaultConfig = loadConfig(['--root', temp]);
   assert.equal(defaultConfig.codexDiagnosticReadMode, 'off');
+  assert.equal(defaultConfig.codexDiagnosticReadRequested, false);
   assert.equal(defaultConfig.allowedRoots.includes(path.join(temp, '.codex')), false);
   assert.throws(() => loadConfig(['--root', temp, '--codex-diagnostic-read', 'unsafe']));
 
   const offServer = createCodexProServer(defaultConfig);
   assert.equal(Object.keys(offServer._registeredTools).some((name) => name.startsWith('codex_diagnostic_')), false);
-  const readServer = createCodexProServer(loadConfig(['--root', temp, '--codex-diagnostic-read', 'read']));
+  const requestedReadConfig = loadConfig(['--root', temp, '--codex-diagnostic-read', 'read']);
+  assert.equal(requestedReadConfig.codexDiagnosticReadRequested, true);
+  assert.equal(requestedReadConfig.codexDiagnosticReadMode, 'off');
+  const requestedReadServer = createCodexProServer(requestedReadConfig);
+  assert.equal(Object.keys(requestedReadServer._registeredTools).some((name) => name.startsWith('codex_diagnostic_')), false);
+  const readServer = createCodexProServer({
+    ...requestedReadConfig,
+    codexDiagnosticReadMode: 'read',
+    codexDiagnosticHelper: {
+      executablePath: 'C:\\synthetic-manager-package\\CodexProSafe.DiagnosticHelper.exe',
+      protocolVersion: 'codexpro-diagnostic-v1',
+      sha256: 'b'.repeat(64)
+    }
+  });
   assert.deepEqual(
     Object.keys(readServer._registeredTools).filter((name) => name.startsWith('codex_diagnostic_')).sort(),
     ['codex_diagnostic_config_summary', 'codex_diagnostic_inventory', 'codex_diagnostic_sqlite_metadata']

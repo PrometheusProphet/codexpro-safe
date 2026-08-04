@@ -1088,13 +1088,11 @@ Use the MCP `read` and `search` tools for file contents. The safe shell blocks o
 
 ## Codex runtime diagnostic read profile
 
-`CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE=off` is the default. Set it to `read`, or
-launch with `--codex-diagnostic-read read`, only when you need the three
-purpose-built metadata diagnostics for the current user's Codex runtime.
-
-```bash
-codexpro start --codex-diagnostic-read read
-```
+`CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE=off` is the default. `read` is only a
+request; it becomes effective exclusively for a connector instance launched
+and verified by the installed CodexPro-Safe Manager. Supplying the option,
+helper environment values, or an arbitrary helper directly leaves diagnostics
+effectively off and does not advertise the diagnostic tools.
 
 The profile does not add the user home or Codex runtime directory to workspace
 roots, generic read/search/tree/bash/SQLite/write, or handoff access. It only
@@ -1109,11 +1107,23 @@ On Windows, readable results require the Manager-owned
 `CodexProSafe.DiagnosticHelper.exe`. The Manager build fingerprints that exact
 app-local helper, installation seals its path, protocol, and SHA-256 into the
 current user's DPAPI-protected settings, and the Manager retains a no-delete
-file lock while starting and supervising the connector. The connector accepts
-that contract only from its inherited Manager environment, verifies the helper
-before starting one persistent bounded IPC process, and never searches `PATH`.
-Without this complete contract—including on non-Windows systems—the tools stay
-registered in `read` mode but return `unavailable`.
+file lock while starting and supervising the connector. Before launch, the
+Manager creates a unique one-shot named-pipe broker and passes only its locator
+through the environment. The HTTP connector invokes the fixed installed
+Manager executable as a proof client. Before the launcher may create the HTTP
+child, the Manager assigns it to an unnamed retained Windows Job object. A
+separate one-shot gate verifies the exact launcher PID and delivers a random
+per-instance capability through the pipe—not environment or argv. The launcher
+passes it to the HTTP child and fixed Manager proof client only through private
+stdin pipes. The proof client verifies the broker is the same fixed Manager
+asset and returns that capability; the lifecycle Manager compares it in
+constant time before applying supplemental job-membership and ancestry checks.
+Only then does the broker release the sealed helper contract. The proof expires,
+cannot be replayed, and is not satisfied by environment, argv, or spoofed parent
+metadata alone. The connector then
+rechecks the helper and starts one persistent bounded IPC process without a
+`PATH` search. Without the complete proof—including on non-Windows systems—the
+effective mode remains `off` and the diagnostic tools are absent.
 
 The helper opens the fixed `~/.codex` root with Win32 reparse-safe directory
 semantics, enumerates direct children through that retained handle, and uses one
@@ -1124,9 +1134,12 @@ It cannot accept a caller path, filename, glob, SQL, table, or native command.
 The Manager likewise opens the app-local helper and its parent with
 reparse-point-safe handles, rejects redirected or multi-link package objects,
 and retains both handles while the persistent helper process starts.
-The fingerprint is not code signing: the boundary assumes the Manager launch
-contract and DPAPI-protected settings remain trusted and does not protect
-against an actor able to replace both of them.
+The fingerprint and process proof are not code signing: the boundary assumes
+the fixed installed Manager executable and DPAPI-protected settings remain
+trusted and does not protect against an actor able to replace those
+Manager-owned assets. The pipe name is only a locator; trust comes from the
+two-sided private capability, Windows PID, image, job-membership, instance,
+ancestry, and lifetime checks.
 
 The SQLite implementation reads a bounded database file into an in-memory
 `sql.js` copy and never opens the runtime database for SQLite file access, so it

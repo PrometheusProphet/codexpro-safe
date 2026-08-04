@@ -18,6 +18,7 @@ namespace CodexProSafeManager
         private Process connector;
         private Process tunnel;
         private DiagnosticHelperLock diagnosticHelperLock;
+        private DiagnosticLaunchBroker diagnosticLaunchBroker;
         private AppSettings settings;
         private bool disposed;
         private bool intentionalStop;
@@ -58,14 +59,15 @@ namespace CodexProSafeManager
             return "run --profile " + Quote(value.TunnelProfile);
         }
 
-        internal static IDictionary<string, string> BuildConnectorEnvironment(AppSettings value)
+        internal static IDictionary<string, string> BuildConnectorEnvironment(AppSettings value, string managerPipeName, string managerGateName)
         {
             IDictionary<string, string> environment = new Dictionary<string, string>();
             if (value.CodexDiagnosticReadMode == "read")
             {
-                environment["CODEXPRO_DIAGNOSTIC_HELPER_PATH"] = value.DiagnosticHelperPath;
-                environment["CODEXPRO_DIAGNOSTIC_HELPER_VERSION"] = value.DiagnosticHelperProtocolVersion;
-                environment["CODEXPRO_DIAGNOSTIC_HELPER_SHA256"] = value.DiagnosticHelperSha256;
+                if (String.IsNullOrWhiteSpace(managerPipeName) || String.IsNullOrWhiteSpace(managerGateName))
+                    throw new InvalidOperationException("The Manager diagnostic launch proof is unavailable.");
+                environment["CODEXPRO_DIAGNOSTIC_MANAGER_PIPE"] = managerPipeName;
+                environment["CODEXPRO_DIAGNOSTIC_MANAGER_GATE"] = managerGateName;
             }
             return environment;
         }
@@ -237,10 +239,26 @@ namespace CodexProSafeManager
 
             ReleaseDiagnosticHelperLock();
             if (settings.CodexDiagnosticReadMode == "read")
+            {
                 diagnosticHelperLock = DiagnosticHelperTrust.OpenVerifiedLock(settings, Process.GetCurrentProcess().MainModule.FileName);
+                diagnosticLaunchBroker = new DiagnosticLaunchBroker(
+                    settings,
+                    Process.GetCurrentProcess().MainModule.FileName,
+                    settings.NodePath,
+                    settings.RepositoryPath,
+                    15000,
+                    2);
+            }
             try
             {
-                connector = CreateProcess(settings.NodePath, BuildConnectorArguments(settings), settings.RepositoryPath, BuildConnectorEnvironment(settings));
+                connector = CreateProcess(
+                    settings.NodePath,
+                    BuildConnectorArguments(settings),
+                    settings.RepositoryPath,
+                    BuildConnectorEnvironment(
+                        settings,
+                        diagnosticLaunchBroker == null ? null : diagnosticLaunchBroker.PipeName,
+                        diagnosticLaunchBroker == null ? null : diagnosticLaunchBroker.GateName));
             }
             catch
             {
@@ -252,6 +270,7 @@ namespace CodexProSafeManager
                 AttachProcess(connector, "connector");
                 Emit("manager", "Starting connector on 127.0.0.1:8787.");
                 connector.Start();
+                if (diagnosticLaunchBroker != null) diagnosticLaunchBroker.BindConnector(connector);
                 connector.BeginOutputReadLine();
                 connector.BeginErrorReadLine();
             }
@@ -700,6 +719,11 @@ namespace CodexProSafeManager
 
         private void ReleaseDiagnosticHelperLock()
         {
+            if (diagnosticLaunchBroker != null)
+            {
+                diagnosticLaunchBroker.Dispose();
+                diagnosticLaunchBroker = null;
+            }
             if (diagnosticHelperLock == null) return;
             diagnosticHelperLock.Dispose();
             diagnosticHelperLock = null;

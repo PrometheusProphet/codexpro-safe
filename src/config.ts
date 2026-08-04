@@ -30,6 +30,8 @@ export interface CodexProConfig {
   toolMode: ToolMode;
   toolCardMode: ToolCardMode;
   codexDiagnosticReadMode: CodexDiagnosticReadMode;
+  codexDiagnosticReadRequested: boolean;
+  codexDiagnosticManagerPipe?: string;
   codexDiagnosticHelper?: CodexDiagnosticHelperConfig;
   inheritEnv: boolean;
   maxReadBytes: number;
@@ -207,14 +209,9 @@ function codexDiagnosticReadModeFrom(value: string | undefined): CodexDiagnostic
   throw new Error("CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE must be off or read.");
 }
 
-function codexDiagnosticHelperFromEnvironment(): CodexDiagnosticHelperConfig | undefined {
-  const executablePath = process.env.CODEXPRO_DIAGNOSTIC_HELPER_PATH?.trim();
-  const protocolVersion = process.env.CODEXPRO_DIAGNOSTIC_HELPER_VERSION?.trim();
-  const sha256 = process.env.CODEXPRO_DIAGNOSTIC_HELPER_SHA256?.trim().toLowerCase();
-  if (!executablePath || !protocolVersion || !sha256) return undefined;
-  if (!path.isAbsolute(executablePath) || path.basename(executablePath).toLowerCase() !== "codexprosafe.diagnostichelper.exe") return undefined;
-  if (!/^codexpro-diagnostic-v1$/.test(protocolVersion) || !/^[a-f0-9]{64}$/.test(sha256)) return undefined;
-  return { executablePath: path.resolve(executablePath), protocolVersion, sha256 };
+function codexDiagnosticManagerPipeFromEnvironment(): string | undefined {
+  const value = process.env.CODEXPRO_DIAGNOSTIC_MANAGER_PIPE?.trim();
+  return value && /^codexpro-safe-diagnostic-[a-f0-9]{32}$/.test(value) ? value : undefined;
 }
 
 function widgetDomainFrom(value: string | undefined): string {
@@ -303,6 +300,9 @@ export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
   const toolModeArg = typeof args["tool-mode"] === "string" ? args["tool-mode"] : undefined;
   const toolCardModeArg = typeof args["tool-card-mode"] === "string" ? args["tool-card-mode"] : undefined;
   const diagnosticReadModeArg = typeof args["codex-diagnostic-read"] === "string" ? args["codex-diagnostic-read"] : undefined;
+  const requestedDiagnosticReadMode = codexDiagnosticReadModeFrom(
+    diagnosticReadModeArg ?? process.env.CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE
+  );
   const widgetDomainArg = typeof args["widget-domain"] === "string" ? args["widget-domain"] : undefined;
   const extraBlockedGlobs = splitList(process.env.CODEXPRO_BLOCKED_GLOBS, ",");
   const host = hostArg ?? process.env.HOST ?? process.env.CODEXPRO_HOST ?? "127.0.0.1";
@@ -331,8 +331,11 @@ export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
     writeMode: writeModeFrom(writeArg ?? process.env.CODEXPRO_WRITE_MODE),
     toolMode: toolModeFrom(toolModeArg ?? process.env.CODEXPRO_TOOL_MODE),
     toolCardMode: toolCardModeFrom(toolCardModeArg ?? process.env.CODEXPRO_TOOL_CARD_MODE),
-    codexDiagnosticReadMode: codexDiagnosticReadModeFrom(diagnosticReadModeArg ?? process.env.CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE),
-    codexDiagnosticHelper: codexDiagnosticHelperFromEnvironment(),
+    // `read` is an effective capability, not a request flag. The asynchronous
+    // Manager launch proof promotes this to read before the server is created.
+    codexDiagnosticReadMode: "off",
+    codexDiagnosticReadRequested: requestedDiagnosticReadMode === "read",
+    codexDiagnosticManagerPipe: codexDiagnosticManagerPipeFromEnvironment(),
     inheritEnv: process.env.CODEXPRO_INHERIT_ENV === "1",
     maxReadBytes: numberFrom(process.env.CODEXPRO_MAX_READ_BYTES, 180_000, 4_000, 2_000_000),
     maxWriteBytes: numberFrom(process.env.CODEXPRO_MAX_WRITE_BYTES, 1_000_000, 1_000, 10_000_000),

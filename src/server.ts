@@ -18,6 +18,7 @@ import { savePromptFile } from "./promptFileOps.js";
 import { runtimeBuildInfo } from "./buildInfo.js";
 import { CodexDiagnosticOperations } from "./diagnosticOps.js";
 import { ManagedWindowsDiagnosticBoundary } from "./windowsDiagnosticBoundary.js";
+import { resolveWindowsManagerLaunchProof, type ManagerLaunchProof } from "./windowsManagerLaunchProof.js";
 
 const RUNTIME_BUILD_INFO = runtimeBuildInfo(import.meta.url);
 
@@ -710,7 +711,7 @@ function getSharedWorkspaceManager(config: CodexProConfig): WorkspaceManager {
 }
 
 function getSharedDiagnosticBoundary(config: CodexProConfig): ManagedWindowsDiagnosticBoundary | undefined {
-  if (config.codexDiagnosticReadMode !== "read" || !config.codexDiagnosticHelper) return undefined;
+  if (!config.codexDiagnosticHelper) return undefined;
   const helper = config.codexDiagnosticHelper;
   const key = `${helper.executablePath}\0${helper.protocolVersion}\0${helper.sha256}`;
   const existing = diagnosticBoundaries.get(key);
@@ -724,13 +725,44 @@ function getSharedDiagnosticBoundary(config: CodexProConfig): ManagedWindowsDiag
   return boundary;
 }
 
-export async function warmCodexDiagnosticBoundary(config: CodexProConfig): Promise<void> {
-  const boundary = getSharedDiagnosticBoundary(config);
-  if (!boundary) return;
-  // Missing, mismatched, or failed helpers remain cached and fail closed at
-  // tool use; warming prevents a later HTTP session from starting a new helper
-  // after the Manager's retained launch lock is gone.
-  await boundary.ready().catch(() => undefined);
+interface DiagnosticWarmOptions {
+  resolveLaunchProofForTest?: () => Promise<ManagerLaunchProof | undefined>;
+  boundaryForTest?: { ready(): Promise<void>; close(): void };
+}
+
+export async function warmCodexDiagnosticBoundary(
+  config: CodexProConfig,
+  options: DiagnosticWarmOptions = {}
+): Promise<void> {
+  config.codexDiagnosticReadMode = "off";
+  config.codexDiagnosticHelper = undefined;
+  if (!config.codexDiagnosticReadRequested || !config.codexDiagnosticManagerPipe) return;
+
+  let proof: ManagerLaunchProof | undefined;
+  try {
+    proof = await (options.resolveLaunchProofForTest
+      ? options.resolveLaunchProofForTest()
+      : resolveWindowsManagerLaunchProof({ pipeName: config.codexDiagnosticManagerPipe }));
+  } catch {
+    proof = undefined;
+  }
+  if (!proof) return;
+
+  config.codexDiagnosticHelper = proof.helper;
+  const boundary = options.boundaryForTest ?? getSharedDiagnosticBoundary(config);
+  if (!boundary) {
+    config.codexDiagnosticHelper = undefined;
+    return;
+  }
+  try {
+    // The helper is not constructed or started until the one-shot Manager
+    // launch proof has authenticated and supplied the sealed contract.
+    await boundary.ready();
+    config.codexDiagnosticReadMode = "read";
+  } catch {
+    boundary.close();
+    config.codexDiagnosticHelper = undefined;
+  }
 }
 
 export function createCodexProServer(config: CodexProConfig): McpServer {

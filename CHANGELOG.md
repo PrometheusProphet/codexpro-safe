@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Closed the direct-connector diagnostic launch bypass. A `read` request now
+  remains effectively off until an expiring one-shot Windows pipe handshake
+  mutually binds the fixed installed Manager process to a private capability
+  released by PID-authenticated gate and passed only through stdin pipes, with
+  job membership and ancestry as supplemental checks; helper trust environment
+  values and spoofed parent metadata no longer advertise or start diagnostics.
 - Replaced diagnostic root pathname traversal on Windows with a Manager-owned
   native helper that enumerates from one retained root handle and opens selected
   files by basename relative to that handle. The helper is app-local,

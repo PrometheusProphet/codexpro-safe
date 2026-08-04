@@ -67,7 +67,13 @@ Codex diagnostics default to **Off**. **Read-only** enables only fixed-root,
 metadata-only diagnostics and does not grant generic home/runtime access or any
 maintenance action. The installed Manager seals and verifies its companion
 helper in DPAPI-protected settings and refuses unverified external connectors
-in this mode. A setting change takes effect through **Restart All**.
+in this mode. Its one-shot gate authenticates the exact launcher PID and sends a
+random per-instance capability through private pipes, never environment or
+argv. The fixed Manager proof client must return that capability to the real
+Manager pipe server before supplemental job-membership and ancestry checks run
+and the helper contract is released. Environment, command-line values, and
+spoofed parent metadata alone cannot enable the profile. A setting change takes
+effect through **Restart All**.
 
 After takeover, use **Start All**, **Restart All**, and **Stop All** from either
 the main window or the notification-area menu. Closing the window minimizes it.
@@ -101,3 +107,10 @@ The installed application lives under:
 That directory also contains the exact diagnostic helper and build manifest.
 Installation seals their contract but does not start diagnostics, restart live
 services, inspect `~/.codex`, or establish plugin callability by itself.
+
+The installed Manager executable is also the connector's native launch-proof
+client. It authenticates the lifecycle Manager pipe server by PID and fixed
+image path; the server requires the private gate capability and then checks the
+proof client's job membership, real PID, creation time, and ancestry through
+the Manager-created launcher and HTTP process. Pipe and gate locators are
+inherited environment data but are not themselves credentials or proof.

@@ -12,6 +12,19 @@ namespace CodexProSafeManager
         [STAThread]
         private static int Main(string[] args)
         {
+            if (args.Length == 2 && String.Equals(args[0], "--diagnostic-launch-proof-client", StringComparison.Ordinal))
+                return DiagnosticLaunchProofClient.Run(args[1], true, 3500);
+            if (args.Length == 2 && String.Equals(args[0], "--diagnostic-launch-test-client", StringComparison.Ordinal))
+                return DiagnosticLaunchProofClient.Run(args[1], false, 400);
+            if (args.Length == 4 && String.Equals(args[0], "--diagnostic-launch-test-launcher", StringComparison.Ordinal))
+                return DiagnosticLaunchProofSelfTest.RunLauncher(args[1], args[2], args[3], System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
+            if (args.Length == 3 && String.Equals(args[0], "--diagnostic-launch-test-server", StringComparison.Ordinal))
+                return DiagnosticLaunchProofSelfTest.RunServer(args[1], args[2], System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
+            if (args.Length == 1 && String.Equals(args[0], "--diagnostic-launch-test-sleep", StringComparison.Ordinal))
+            {
+                System.Threading.Thread.Sleep(1500);
+                return 0;
+            }
             if (args.Any(delegate(string value) { return String.Equals(value, "--self-test", StringComparison.OrdinalIgnoreCase); }))
                 return SelfTestProgram.Run();
             if (args.Any(delegate(string value) { return String.Equals(value, "--seal-helper-trust", StringComparison.OrdinalIgnoreCase); }))

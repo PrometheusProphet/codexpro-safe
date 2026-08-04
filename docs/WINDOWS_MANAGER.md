@@ -95,7 +95,7 @@ Changing Codex diagnostics takes effect only after the existing controlled
 connector restart. The Manager includes its saved `off`/`read` value in the
 connector arguments and refuses external-process takeover when it does not
 match. In `read` mode it also refuses to use or take over an external connector
-because that process's helper environment cannot be verified.
+because that process instance cannot satisfy the Manager-owned launch proof.
 
 The build produces `CodexProSafe.DiagnosticHelper.exe` and an exact SHA-256
 manifest beside the Manager. The installer copies both files to the same
@@ -103,16 +103,34 @@ per-user application directory and runs the Manager's noninteractive sealing
 mode, which persists the helper path, protocol, and fingerprint inside the
 existing DPAPI-protected settings. On connector start, the Manager verifies the
 saved values and file bytes while retaining a no-delete lock, then supplies the
-contract through the connector environment. The connector never searches
-`PATH`, and the helper never accepts a path argument. The package directory and
-helper executable are opened without following reparse points; redirected,
-unexpected-type, or multi-link package objects are rejected before launch.
+contract only after a one-shot Windows named-pipe proof. The environment carries
+random pipe and startup-gate locators, not the helper path, protocol, or
+fingerprint. The launcher must wait at that gate while the Manager assigns it
+to a newly created unnamed Windows Job object. The gate verifies the exact
+launcher PID through Windows and releases a random per-instance capability over
+the pipe; that capability is passed to the HTTP child and fixed Manager proof
+client only through private stdin pipes, never environment or argv. The proof
+client verifies that Windows reports the lifecycle Manager as the proof-pipe
+server, then returns the private capability. The lifecycle Manager compares it
+in constant time before applying supplemental job-membership, PID, creation
+time, executable-path, command-line, and ancestry checks. The broker is
+instance-bound, expires after startup, and accepts only one connection, so
+stale, replayed, parent-spoofed, or unrelated connector attempts fail closed.
+Only the authenticated pipe response releases the sealed helper contract.
 
-This SHA-256 binding is an app-local substitution check, not a general
-code-signing root. It assumes the Manager executable, its controlled launch
-contract, and the current user's DPAPI-protected settings remain trusted. An
-actor able to replace both that launch contract and the protected settings is
-outside this boundary.
+The connector never searches `PATH`, and the helper never accepts a path
+argument. The package directory and helper executable are opened without
+following reparse points; redirected, unexpected-type, or multi-link package
+objects are rejected before launch. A direct connector with copied environment
+or argv values cannot obtain the private capability released only to the exact
+Manager-created launcher, and a fake proof endpoint is rejected because its
+server is not the trusted installed Manager. Job membership and lineage are
+additional checks, not the sole ownership proof.
+
+This SHA-256 binding and process proof are app-local substitution and ownership
+checks, not a general code-signing root. They assume the fixed installed Manager
+executable and the current user's DPAPI-protected settings remain trusted. An
+actor able to replace those Manager-owned assets is outside this boundary.
 
 Read-only diagnostics are synthetic-test coverage only; they do not
 verify or inspect this user's live runtime during installation, and maintenance

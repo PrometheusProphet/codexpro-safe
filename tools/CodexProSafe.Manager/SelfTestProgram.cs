@@ -34,13 +34,16 @@ namespace CodexProSafeManager
                     @"C:\Users\test\Projects"), "takeover root matching");
                 Assert(ProcessSupervisor.ContainsArgument(connector, "--codex-diagnostic-read", "read"), "takeover diagnostic matching");
                 Assert(!ProcessSupervisor.ContainsArgument(connector, "--codex-diagnostic-read", "off"), "takeover diagnostic mismatch");
-                System.Collections.Generic.IDictionary<string, string> helperEnvironment = ProcessSupervisor.BuildConnectorEnvironment(settings);
-                Assert(helperEnvironment["CODEXPRO_DIAGNOSTIC_HELPER_PATH"].EndsWith("CodexProSafe.DiagnosticHelper.exe"), "helper exact path");
-                Assert(helperEnvironment["CODEXPRO_DIAGNOSTIC_HELPER_VERSION"] == DiagnosticHelperTrust.ProtocolVersion, "helper protocol");
-                Assert(helperEnvironment["CODEXPRO_DIAGNOSTIC_HELPER_SHA256"].Length == 64, "helper fingerprint");
+                string syntheticPipe = "codexpro-safe-diagnostic-0123456789abcdef0123456789abcdef";
+                string syntheticGate = "codexpro-safe-diagnostic-gate-0123456789abcdef0123456789abcdef";
+                System.Collections.Generic.IDictionary<string, string> helperEnvironment = ProcessSupervisor.BuildConnectorEnvironment(settings, syntheticPipe, syntheticGate);
+                Assert(helperEnvironment.Count == 2 && helperEnvironment["CODEXPRO_DIAGNOSTIC_MANAGER_PIPE"] == syntheticPipe &&
+                    helperEnvironment["CODEXPRO_DIAGNOSTIC_MANAGER_GATE"] == syntheticGate, "manager proof environment locators only");
+                Assert(!helperEnvironment.ContainsKey("CODEXPRO_DIAGNOSTIC_HELPER_PATH"), "helper path not transported by environment");
                 using (DiagnosticHelperLock helperLock = DiagnosticHelperTrust.OpenVerifiedLock(settings, System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName))
                 {
                     Assert(helperLock.Length > 0, "helper verified lock");
+                    DiagnosticLaunchProofSelfTest.Run(settings, System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
                     System.Diagnostics.ProcessStartInfo helperStart = new System.Diagnostics.ProcessStartInfo();
                     helperStart.FileName = settings.DiagnosticHelperPath;
                     helperStart.Arguments = "--self-test";
