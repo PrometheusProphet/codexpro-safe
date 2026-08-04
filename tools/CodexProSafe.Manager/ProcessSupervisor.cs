@@ -17,6 +17,7 @@ namespace CodexProSafeManager
         private readonly SemaphoreSlim operationLock = new SemaphoreSlim(1, 1);
         private Process connector;
         private Process tunnel;
+        private DiagnosticHelperLock diagnosticHelperLock;
         private AppSettings settings;
         private bool disposed;
         private bool intentionalStop;
@@ -55,6 +56,18 @@ namespace CodexProSafeManager
         public static string BuildTunnelArguments(AppSettings value)
         {
             return "run --profile " + Quote(value.TunnelProfile);
+        }
+
+        internal static IDictionary<string, string> BuildConnectorEnvironment(AppSettings value)
+        {
+            IDictionary<string, string> environment = new Dictionary<string, string>();
+            if (value.CodexDiagnosticReadMode == "read")
+            {
+                environment["CODEXPRO_DIAGNOSTIC_HELPER_PATH"] = value.DiagnosticHelperPath;
+                environment["CODEXPRO_DIAGNOSTIC_HELPER_VERSION"] = value.DiagnosticHelperProtocolVersion;
+                environment["CODEXPRO_DIAGNOSTIC_HELPER_SHA256"] = value.DiagnosticHelperSha256;
+            }
+            return environment;
         }
 
         public static string Quote(string value)
@@ -204,8 +217,16 @@ namespace CodexProSafeManager
 
         private async Task StartConnectorCoreAsync()
         {
+            if (connector != null && connector.HasExited)
+            {
+                connector.Dispose();
+                connector = null;
+                ReleaseDiagnosticHelperLock();
+            }
             if (await ProbeAsync("http://127.0.0.1:8787/healthz"))
             {
+                if (!IsAlive(connector) && settings.CodexDiagnosticReadMode == "read")
+                    throw new InvalidOperationException("Refused to use an external connector for diagnostics because its helper launch contract cannot be verified.");
                 Emit("manager", IsAlive(connector)
                     ? "Connector is already healthy."
                     : "Connector is already healthy and running outside the manager.");
@@ -214,12 +235,33 @@ namespace CodexProSafeManager
             string validation = settings.ValidateForConnector();
             if (validation != null) throw new InvalidOperationException(validation);
 
-            connector = CreateProcess(settings.NodePath, BuildConnectorArguments(settings), settings.RepositoryPath, null);
-            AttachProcess(connector, "connector");
-            Emit("manager", "Starting connector on 127.0.0.1:8787.");
-            connector.Start();
-            connector.BeginOutputReadLine();
-            connector.BeginErrorReadLine();
+            ReleaseDiagnosticHelperLock();
+            if (settings.CodexDiagnosticReadMode == "read")
+                diagnosticHelperLock = DiagnosticHelperTrust.OpenVerifiedLock(settings, Process.GetCurrentProcess().MainModule.FileName);
+            try
+            {
+                connector = CreateProcess(settings.NodePath, BuildConnectorArguments(settings), settings.RepositoryPath, BuildConnectorEnvironment(settings));
+            }
+            catch
+            {
+                ReleaseDiagnosticHelperLock();
+                throw;
+            }
+            try
+            {
+                AttachProcess(connector, "connector");
+                Emit("manager", "Starting connector on 127.0.0.1:8787.");
+                connector.Start();
+                connector.BeginOutputReadLine();
+                connector.BeginErrorReadLine();
+            }
+            catch
+            {
+                connector.Dispose();
+                connector = null;
+                ReleaseDiagnosticHelperLock();
+                throw;
+            }
             if (!await WaitForProbeAsync("http://127.0.0.1:8787/healthz", 20000))
                 throw new InvalidOperationException("Connector did not become healthy within 20 seconds. Open Logs for details.");
             Emit("manager", "Connector is healthy.");
@@ -268,6 +310,12 @@ namespace CodexProSafeManager
 
         private async Task StopConnectorCoreAsync(bool allowExactTakeover)
         {
+            if (connector != null && connector.HasExited)
+            {
+                connector.Dispose();
+                connector = null;
+                ReleaseDiagnosticHelperLock();
+            }
             if (IsAlive(connector))
             {
                 int pid = connector.Id;
@@ -275,6 +323,7 @@ namespace CodexProSafeManager
                 await WaitForExitAsync(connector, 5000);
                 connector.Dispose();
                 connector = null;
+                ReleaseDiagnosticHelperLock();
                 Emit("manager", "Stopped managed connector.");
                 return;
             }
@@ -320,6 +369,7 @@ namespace CodexProSafeManager
 
         private int FindMatchingConnectorOwner(int portPid)
         {
+            if (settings.CodexDiagnosticReadMode == "read") return -1;
             if (portPid <= 0) return -1;
             ProcessIdentity child = GetIdentity(portPid);
             if (child == null || !String.Equals(child.Name, "node.exe", StringComparison.OrdinalIgnoreCase))
@@ -645,6 +695,14 @@ namespace CodexProSafeManager
             operationLock.Dispose();
             if (connector != null) connector.Dispose();
             if (tunnel != null) tunnel.Dispose();
+            ReleaseDiagnosticHelperLock();
+        }
+
+        private void ReleaseDiagnosticHelperLock()
+        {
+            if (diagnosticHelperLock == null) return;
+            diagnosticHelperLock.Dispose();
+            diagnosticHelperLock = null;
         }
 
         private sealed class ProcessIdentity

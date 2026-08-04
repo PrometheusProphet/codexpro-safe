@@ -1105,10 +1105,36 @@ path escapes, unexpected types, ambiguous database families, and unsafe races;
 their responses are bounded and omit configuration strings, paths, transcript
 names, logs, row values, SQL, and identifiers.
 
+On Windows, readable results require the Manager-owned
+`CodexProSafe.DiagnosticHelper.exe`. The Manager build fingerprints that exact
+app-local helper, installation seals its path, protocol, and SHA-256 into the
+current user's DPAPI-protected settings, and the Manager retains a no-delete
+file lock while starting and supervising the connector. The connector accepts
+that contract only from its inherited Manager environment, verifies the helper
+before starting one persistent bounded IPC process, and never searches `PATH`.
+Without this complete contract—including on non-Windows systems—the tools stay
+registered in `read` mode but return `unavailable`.
+
+The helper opens the fixed `~/.codex` root with Win32 reparse-safe directory
+semantics, enumerates direct children through that retained handle, and uses one
+isolated `NtCreateFile` wrapper for basename-only child opens relative to the
+root handle. It compares volume and 128-bit file identity, rejects reparse
+points and multi-link files, and retains both handles through each bounded read.
+It cannot accept a caller path, filename, glob, SQL, table, or native command.
+The Manager likewise opens the app-local helper and its parent with
+reparse-point-safe handles, rejects redirected or multi-link package objects,
+and retains both handles while the persistent helper process starts.
+The fingerprint is not code signing: the boundary assumes the Manager launch
+contract and DPAPI-protected settings remain trusted and does not protect
+against an actor able to replace both of them.
+
 The SQLite implementation reads a bounded database file into an in-memory
 `sql.js` copy and never opens the runtime database for SQLite file access, so it
-cannot checkpoint, journal, or modify the runtime file. Synthetic temporary
-homes and databases cover this contract; this is not evidence about a live
+cannot checkpoint, journal, or modify the runtime file. Analysis runs in a
+resource-limited worker that is terminated when its wall-clock budget expires,
+so synchronous SQLite work cannot block the connector's timeout. Synthetic temporary
+homes, native handle races, IPC failures, and databases cover this contract;
+this is not evidence about a live
 Codex runtime, process lock, or Manager installation. Maintenance is not part
 of this profile.
 

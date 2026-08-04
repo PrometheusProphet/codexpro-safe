@@ -6,6 +6,7 @@ namespace CodexProSafeManager
 {
     internal sealed class SettingsForm : Form
     {
+        private readonly AppSettings original;
         private readonly TextBox repository = new TextBox();
         private readonly TextBox workspace = new TextBox();
         private readonly TextBox allowed = new TextBox();
@@ -24,6 +25,7 @@ namespace CodexProSafeManager
 
         public SettingsForm(AppSettings value)
         {
+            original = value;
             Text = "CodexPro-Safe Manager Settings";
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(720, 585);
@@ -192,7 +194,10 @@ namespace CodexProSafeManager
                 StartMinimized = startMinimized.Checked,
                 AutoStartServices = autoStart.Checked,
                 RestartOnFailure = restartOnFailure.Checked,
-                CodexDiagnosticReadMode = (codexDiagnosticRead.SelectedItem as string) == "Read-only" ? "read" : "off"
+                CodexDiagnosticReadMode = (codexDiagnosticRead.SelectedItem as string) == "Read-only" ? "read" : "off",
+                DiagnosticHelperPath = original.DiagnosticHelperPath,
+                DiagnosticHelperProtocolVersion = original.DiagnosticHelperProtocolVersion,
+                DiagnosticHelperSha256 = original.DiagnosticHelperSha256
             };
             DialogResult = DialogResult.OK;
             Close();

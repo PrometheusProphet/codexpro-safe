@@ -8,6 +8,12 @@ export type ToolMode = "minimal" | "standard" | "full";
 export type ToolCardMode = "off" | "compact";
 export type CodexDiagnosticReadMode = "off" | "read";
 
+export interface CodexDiagnosticHelperConfig {
+  executablePath: string;
+  protocolVersion: string;
+  sha256: string;
+}
+
 export interface CodexProConfig {
   defaultRoot: string;
   allowedRoots: string[];
@@ -24,6 +30,7 @@ export interface CodexProConfig {
   toolMode: ToolMode;
   toolCardMode: ToolCardMode;
   codexDiagnosticReadMode: CodexDiagnosticReadMode;
+  codexDiagnosticHelper?: CodexDiagnosticHelperConfig;
   inheritEnv: boolean;
   maxReadBytes: number;
   maxWriteBytes: number;
@@ -200,6 +207,16 @@ function codexDiagnosticReadModeFrom(value: string | undefined): CodexDiagnostic
   throw new Error("CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE must be off or read.");
 }
 
+function codexDiagnosticHelperFromEnvironment(): CodexDiagnosticHelperConfig | undefined {
+  const executablePath = process.env.CODEXPRO_DIAGNOSTIC_HELPER_PATH?.trim();
+  const protocolVersion = process.env.CODEXPRO_DIAGNOSTIC_HELPER_VERSION?.trim();
+  const sha256 = process.env.CODEXPRO_DIAGNOSTIC_HELPER_SHA256?.trim().toLowerCase();
+  if (!executablePath || !protocolVersion || !sha256) return undefined;
+  if (!path.isAbsolute(executablePath) || path.basename(executablePath).toLowerCase() !== "codexprosafe.diagnostichelper.exe") return undefined;
+  if (!/^codexpro-diagnostic-v1$/.test(protocolVersion) || !/^[a-f0-9]{64}$/.test(sha256)) return undefined;
+  return { executablePath: path.resolve(executablePath), protocolVersion, sha256 };
+}
+
 function widgetDomainFrom(value: string | undefined): string {
   const raw = value?.trim() || "https://rebel0789.github.io";
   let parsed: URL;
@@ -315,6 +332,7 @@ export function loadConfig(argv = process.argv.slice(2)): CodexProConfig {
     toolMode: toolModeFrom(toolModeArg ?? process.env.CODEXPRO_TOOL_MODE),
     toolCardMode: toolCardModeFrom(toolCardModeArg ?? process.env.CODEXPRO_TOOL_CARD_MODE),
     codexDiagnosticReadMode: codexDiagnosticReadModeFrom(diagnosticReadModeArg ?? process.env.CODEXPRO_CODEX_DIAGNOSTIC_READ_MODE),
+    codexDiagnosticHelper: codexDiagnosticHelperFromEnvironment(),
     inheritEnv: process.env.CODEXPRO_INHERIT_ENV === "1",
     maxReadBytes: numberFrom(process.env.CODEXPRO_MAX_READ_BYTES, 180_000, 4_000, 2_000_000),
     maxWriteBytes: numberFrom(process.env.CODEXPRO_MAX_WRITE_BYTES, 1_000_000, 1_000, 10_000_000),

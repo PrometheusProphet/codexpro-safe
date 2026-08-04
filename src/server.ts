@@ -17,6 +17,7 @@ import { redactSensitiveText, redactStructured } from "./redact.js";
 import { savePromptFile } from "./promptFileOps.js";
 import { runtimeBuildInfo } from "./buildInfo.js";
 import { CodexDiagnosticOperations } from "./diagnosticOps.js";
+import { ManagedWindowsDiagnosticBoundary } from "./windowsDiagnosticBoundary.js";
 
 const RUNTIME_BUILD_INFO = runtimeBuildInfo(import.meta.url);
 
@@ -689,6 +690,7 @@ function annotationSummary(toolNames: string[]): Record<string, unknown> {
 }
 
 const workspaceManagers = new Map<string, WorkspaceManager>();
+const diagnosticBoundaries = new Map<string, ManagedWindowsDiagnosticBoundary>();
 
 function workspaceManagerKey(config: CodexProConfig): string {
   return JSON.stringify({
@@ -707,6 +709,30 @@ function getSharedWorkspaceManager(config: CodexProConfig): WorkspaceManager {
   return manager;
 }
 
+function getSharedDiagnosticBoundary(config: CodexProConfig): ManagedWindowsDiagnosticBoundary | undefined {
+  if (config.codexDiagnosticReadMode !== "read" || !config.codexDiagnosticHelper) return undefined;
+  const helper = config.codexDiagnosticHelper;
+  const key = `${helper.executablePath}\0${helper.protocolVersion}\0${helper.sha256}`;
+  const existing = diagnosticBoundaries.get(key);
+  if (existing) return existing;
+  const boundary = new ManagedWindowsDiagnosticBoundary({
+    executablePath: helper.executablePath,
+    expectedProtocol: helper.protocolVersion,
+    expectedSha256: helper.sha256
+  });
+  diagnosticBoundaries.set(key, boundary);
+  return boundary;
+}
+
+export async function warmCodexDiagnosticBoundary(config: CodexProConfig): Promise<void> {
+  const boundary = getSharedDiagnosticBoundary(config);
+  if (!boundary) return;
+  // Missing, mismatched, or failed helpers remain cached and fail closed at
+  // tool use; warming prevents a later HTTP session from starting a new helper
+  // after the Manager's retained launch lock is gone.
+  await boundary.ready().catch(() => undefined);
+}
+
 export function createCodexProServer(config: CodexProConfig): McpServer {
   const workspaces = getSharedWorkspaceManager(config);
   const guard = new PathGuard(config);
@@ -715,7 +741,8 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     { instructions: serverInstructions(config) }
   );
   registerToolCardResource(server, config);
-  const diagnostics = config.codexDiagnosticReadMode === "read" ? new CodexDiagnosticOperations() : undefined;
+  const diagnosticBoundary = getSharedDiagnosticBoundary(config);
+  const diagnostics = config.codexDiagnosticReadMode === "read" ? new CodexDiagnosticOperations({ boundary: diagnosticBoundary }) : undefined;
 
   registerCodexTool(
     config,

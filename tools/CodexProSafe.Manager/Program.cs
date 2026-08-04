@@ -14,6 +14,8 @@ namespace CodexProSafeManager
         {
             if (args.Any(delegate(string value) { return String.Equals(value, "--self-test", StringComparison.OrdinalIgnoreCase); }))
                 return SelfTestProgram.Run();
+            if (args.Any(delegate(string value) { return String.Equals(value, "--seal-helper-trust", StringComparison.OrdinalIgnoreCase); }))
+                return SealHelperTrust();
 
             bool created;
             using (Mutex mutex = new Mutex(true, MutexName, out created))
@@ -48,6 +50,20 @@ namespace CodexProSafeManager
                 GC.KeepAlive(mutex);
                 return 0;
             }
+        }
+
+        private static int SealHelperTrust()
+        {
+            try
+            {
+                SecureSettingsStore store = new SecureSettingsStore();
+                AppSettings settings = store.Load();
+                string executable = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                DiagnosticHelperTrust.SealInstalledPackage(settings, executable);
+                store.Save(settings, executable);
+                return 0;
+            }
+            catch { return 3; }
         }
     }
 }

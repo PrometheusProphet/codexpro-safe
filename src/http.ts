@@ -5,7 +5,7 @@ import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig, type CodexProConfig } from "./config.js";
-import { createCodexProServer } from "./server.js";
+import { createCodexProServer, warmCodexDiagnosticBoundary } from "./server.js";
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -288,6 +288,7 @@ function corsOriginPolicy(config: CodexProConfig): express.RequestHandler {
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  await warmCodexDiagnosticBoundary(config);
   if (config.requireHttpToken && !config.authToken) {
     throw new Error(
       "CODEXPRO_HTTP_TOKEN is required for this HTTP binding. " +

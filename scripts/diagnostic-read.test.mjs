@@ -9,13 +9,11 @@ import { createCodexProServer } from '../dist/server.js';
 import { CodexDiagnosticOperations } from '../dist/diagnosticOps.js';
 
 const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-safe-diagnostic-'));
-const root = path.join(temp, '.codex');
-await fs.mkdir(root);
 
 try {
   const defaultConfig = loadConfig(['--root', temp]);
   assert.equal(defaultConfig.codexDiagnosticReadMode, 'off');
-  assert.equal(defaultConfig.allowedRoots.includes(root), false);
+  assert.equal(defaultConfig.allowedRoots.includes(path.join(temp, '.codex')), false);
   assert.throws(() => loadConfig(['--root', temp, '--codex-diagnostic-read', 'unsafe']));
 
   const offServer = createCodexProServer(defaultConfig);
@@ -32,33 +30,64 @@ try {
     ['family_kind', 'operation']
   );
 
-  await fs.writeFile(path.join(root, 'config.toml'), '[general]\ntelemetry = true\nsecret = "token-should-not-leak"\nendpoint = "https://private.example"\n');
-  await fs.mkdir(path.join(root, 'skills', 'synthetic-skill', '1.0.0'), { recursive: true });
-  await fs.mkdir(path.join(root, 'plugins', 'synthetic-plugin', '1.0.0'), { recursive: true });
-  await fs.mkdir(path.join(root, 'plugins', 'synthetic-plugin', '2.0.0'), { recursive: true });
-  await fs.mkdir(path.join(root, 'sessions'));
-  await fs.writeFile(path.join(root, 'sessions', 'transcript-private.jsonl'), 'do not expose');
+  assert.equal((await new CodexDiagnosticOperations().inventory()).status, 'unavailable');
+  assert.equal((await new CodexDiagnosticOperations().configurationSummary()).status, 'unavailable');
+  assert.equal((await new CodexDiagnosticOperations().sqliteMetadata('logs', 'summary')).status, 'unavailable');
 
+  const configBytes = Buffer.from('[general]\ntelemetry = true\nsecret = "token-should-not-leak"\nendpoint = "https://private.example"\n');
   const SQL = await initSqlJs();
-  const database = new SQL.Database();
-  database.exec('CREATE TABLE private_events (created_at TEXT, payload TEXT); INSERT INTO private_events VALUES ("2026-01-01", "do-not-leak");');
-  await fs.writeFile(path.join(root, 'logs_synthetic.sqlite'), Buffer.from(database.export()));
-  database.close();
-  await fs.writeFile(path.join(root, 'logs_synthetic.sqlite-wal'), 'sidecar');
+  const sqlite = new SQL.Database();
+  sqlite.exec('CREATE TABLE private_events (created_at TEXT, payload TEXT); INSERT INTO private_events VALUES ("2026-01-01", "do-not-leak");');
+  const databaseBytes = Buffer.from(sqlite.export());
+  sqlite.close();
+  const beforeConfigHash = createHash('sha256').update(configBytes).digest('hex');
+  const beforeDatabaseHash = createHash('sha256').update(databaseBytes).digest('hex');
+  const timestamp = '2026-08-04T00:00:00.000Z';
 
-  const beforeHash = createHash('sha256').update(await fs.readFile(path.join(root, 'logs_synthetic.sqlite'))).digest('hex');
-  const diagnostics = new CodexDiagnosticOperations({ rootForTest: root });
+  const boundary = {
+    async inventory() {
+      return {
+        status: 'ok',
+        entries: [
+          { name: 'config.toml', isDirectory: false, isReparsePoint: false, bytes: configBytes.length, modifiedUtc: timestamp },
+          { name: 'skills', isDirectory: true, isReparsePoint: false, bytes: 0, modifiedUtc: timestamp },
+          { name: 'plugins', isDirectory: true, isReparsePoint: false, bytes: 0, modifiedUtc: timestamp },
+          { name: 'sessions', isDirectory: true, isReparsePoint: false, bytes: 0, modifiedUtc: timestamp },
+          { name: 'logs_synthetic.sqlite', isDirectory: false, isReparsePoint: false, bytes: databaseBytes.length, modifiedUtc: timestamp },
+          { name: 'logs_synthetic.sqlite-wal', isDirectory: false, isReparsePoint: false, bytes: 4, modifiedUtc: timestamp }
+        ]
+      };
+    },
+    async configuration() {
+      return {
+        status: 'ok',
+        files: [
+          { name: 'config.toml', status: 'present', bytes: configBytes.length, modifiedUtc: timestamp, contentBase64: configBytes.toString('base64') },
+          { name: 'config.toml.bak', status: 'absent', bytes: 0, modifiedUtc: timestamp },
+          { name: 'config.toml.backup', status: 'absent', bytes: 0, modifiedUtc: timestamp }
+        ]
+      };
+    },
+    async database(familyKind) {
+      if (familyKind !== 'logs') return { status: 'missing' };
+      return {
+        status: 'ok',
+        database: { name: 'logs_synthetic.sqlite', bytes: databaseBytes.length, modifiedUtc: timestamp, contentBase64: databaseBytes.toString('base64') },
+        sidecars: ['wal']
+      };
+    },
+    close() {}
+  };
+
+  const diagnostics = new CodexDiagnosticOperations({ boundaryForTest: boundary });
   const inventory = await diagnostics.inventory();
   const inventoryText = JSON.stringify(inventory);
   assert.equal(inventory.status, 'ok');
-  assert.equal(inventoryText.includes('transcript-private.jsonl'), false);
-  assert.equal(inventoryText.includes(root), false);
   assert.equal(inventoryText.includes('logs_synthetic.sqlite'), true);
   assert.deepEqual(inventory.installed_extensions, { status: 'unavailable' });
-  assert.equal(inventoryText.includes('synthetic-skill'), false);
-  assert.equal(inventoryText.includes('synthetic-plugin'), false);
-  assert.equal(inventoryText.includes('duplicate_version'), false);
-  assert.equal(inventoryText.includes('1.0.0'), false);
+  for (const forbidden of ['transcript-private.jsonl', 'synthetic-skill', 'synthetic-plugin', 'outside-version', 'duplicate_version', '1.0.0']) {
+    assert.equal(inventoryText.includes(forbidden), false, forbidden);
+  }
   assert.equal(inventory.process_locks.status, 'unavailable');
 
   const configuration = await diagnostics.configurationSummary();
@@ -77,68 +106,45 @@ try {
     assert.equal(serialized.includes('private_events'), false, operation);
     assert.equal(serialized.includes('created_at'), false, operation);
   }
-  const afterHash = createHash('sha256').update(await fs.readFile(path.join(root, 'logs_synthetic.sqlite'))).digest('hex');
-  assert.equal(afterHash, beforeHash, 'SQLite metadata operations must not modify runtime files');
+  assert.equal(createHash('sha256').update(configBytes).digest('hex'), beforeConfigHash);
+  assert.equal(createHash('sha256').update(databaseBytes).digest('hex'), beforeDatabaseHash);
 
-  const external = path.join(temp, 'external');
-  await fs.mkdir(path.join(external, 'outside-skill', 'outside-version'), { recursive: true });
+  const delayedWorker = new CodexDiagnosticOperations({ boundaryForTest: boundary, sqliteWorkerDelayMsForTest: 10_000 });
+  const delayedStarted = Date.now();
+  assert.equal((await delayedWorker.sqliteMetadata('logs', 'summary')).status, 'unavailable');
+  assert.equal(Date.now() - delayedStarted < 3_500, true, 'SQLite worker must be terminated by the wall-clock budget');
 
-  const configPath = path.join(root, 'config.toml');
-  const configBackup = path.join(root, 'config-before-race.toml');
-  const replacementConfig = path.join(external, 'replacement.toml');
-  await fs.writeFile(replacementConfig, '[general]\ntelemetry = false\n');
-  let configSwapComplete = false;
-  const racedConfiguration = new CodexDiagnosticOperations({
-    rootForTest: root,
-    beforeFixedFileReadForTest: async (kind) => {
-      if (kind !== 'configuration' || configSwapComplete) return;
-      configSwapComplete = true;
-      await fs.rename(configPath, configBackup);
-      await fs.copyFile(replacementConfig, configPath);
+  const ambiguous = new CodexDiagnosticOperations({
+    boundaryForTest: { ...boundary, async database() { return { status: 'ambiguous', matches: 2 }; } }
+  });
+  assert.equal((await ambiguous.sqliteMetadata('logs', 'summary')).status, 'ambiguous');
+
+  const oversized = new CodexDiagnosticOperations({
+    boundaryForTest: {
+      ...boundary,
+      async inventory() {
+        return { status: 'ok', entries: [{ name: 'logs_large.sqlite', isDirectory: false, isReparsePoint: false, bytes: 33 * 1024 * 1024, modifiedUtc: timestamp }] };
+      },
+      async database() {
+        return { status: 'oversized', database: { name: 'logs_large.sqlite', bytes: 33 * 1024 * 1024, modifiedUtc: timestamp }, sidecars: [] };
+      }
     }
   });
-  const configurationRace = await racedConfiguration.configurationSummary();
-  assert.equal(configurationRace.status, 'unavailable');
-  assert.equal(JSON.stringify(configurationRace).includes('false'), false);
-  await fs.rm(configPath);
-  await fs.rename(configBackup, configPath);
+  assert.equal(JSON.stringify(await oversized.inventory()).includes('logs_large.sqlite'), true);
+  assert.equal((await oversized.sqliteMetadata('logs', 'summary')).status, 'unavailable');
 
-  const databasePath = path.join(root, 'logs_synthetic.sqlite');
-  const databaseBackup = path.join(root, 'logs-before-race.sqlite');
-  const replacementDatabase = path.join(external, 'replacement.sqlite');
-  await fs.copyFile(databasePath, replacementDatabase);
-  let databaseSwapComplete = false;
-  const racedDatabase = new CodexDiagnosticOperations({
-    rootForTest: root,
-    beforeFixedFileReadForTest: async (kind) => {
-      if (kind !== 'database' || databaseSwapComplete) return;
-      databaseSwapComplete = true;
-      await fs.rename(databasePath, databaseBackup);
-      await fs.copyFile(replacementDatabase, databasePath);
+  const externalMetadata = new CodexDiagnosticOperations({
+    boundaryForTest: {
+      ...boundary,
+      async inventory() {
+        return { status: 'ok', entries: [{ name: 'skills', isDirectory: true, isReparsePoint: true, bytes: 0, modifiedUtc: timestamp }] };
+      }
     }
   });
-  const databaseRace = await racedDatabase.sqliteMetadata('logs', 'row_counts');
-  assert.equal(databaseRace.status, 'unavailable');
-  assert.equal(JSON.stringify(databaseRace).includes('logs_synthetic.sqlite'), false);
-  await fs.rm(databasePath);
-  await fs.rename(databaseBackup, databasePath);
-
-  await fs.writeFile(path.join(root, 'logs_second.sqlite'), await fs.readFile(path.join(root, 'logs_synthetic.sqlite')));
-  assert.equal((await diagnostics.sqliteMetadata('logs', 'summary')).status, 'ambiguous');
-  await fs.rm(path.join(root, 'logs_second.sqlite'));
-
-  await fs.rm(path.join(root, 'skills'), { recursive: true });
-  try {
-    await fs.symlink(external, path.join(root, 'skills'), process.platform === 'win32' ? 'junction' : 'dir');
-    const extensionLinkInventory = await diagnostics.inventory();
-    const extensionLinkText = JSON.stringify(extensionLinkInventory);
-    assert.equal(extensionLinkInventory.status, 'ok');
-    assert.deepEqual(extensionLinkInventory.installed_extensions, { status: 'unavailable' });
-    assert.equal(extensionLinkText.includes('outside-skill'), false);
-    assert.equal(extensionLinkText.includes('outside-version'), false);
-  } catch (error) {
-    if (error?.code !== 'EPERM') throw error;
-  }
+  const externalInventory = await externalMetadata.inventory();
+  assert.equal(externalInventory.status, 'ok');
+  assert.deepEqual(externalInventory.installed_extensions, { status: 'unavailable' });
+  assert.equal(JSON.stringify(externalInventory).includes('outside-skill'), false);
 
   console.log('diagnostic-read tests passed');
 } finally {

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Replaced diagnostic root pathname traversal on Windows with a Manager-owned
+  native helper that enumerates from one retained root handle and opens selected
+  files by basename relative to that handle. The helper is app-local,
+  fingerprint-sealed in DPAPI settings, bounded over framed IPC, and fails
+  closed when unavailable or mismatched. Helper-package reparse points are
+  rejected, and SQLite analysis now runs in a terminable, resource-limited
+  worker so the wall-clock diagnostic timeout is enforceable.
 - Disabled nested skill and plugin extension enumeration in the Codex diagnostic
   inventory on Node >=20 Windows. The `installed_extensions` result is now
   deliberately and stably unavailable rather than exposing extension metadata.

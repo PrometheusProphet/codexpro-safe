@@ -47,6 +47,9 @@ powershell.exe -ExecutionPolicy Bypass -File .\tools\CodexProSafe.Manager\build.
 powershell.exe -ExecutionPolicy Bypass -File .\tools\CodexProSafe.Manager\install.ps1
 ```
 
+Exit a running Manager before installation. The installer refuses to replace or
+reseal the helper package while that lifecycle owner is active.
+
 The installer creates **CodexPro-Safe Manager** on the Windows Desktop and
 installs the executable under:
 
@@ -69,7 +72,9 @@ Open **Settings** and confirm:
 - **Organization ID** — the `org-...` identifier that owns the tunnel.
 - **Codex diagnostics** — **Off** by default. **Read-only** enables only the
   fixed-root, metadata-only Codex diagnostic profile; it does not add the home
-  directory to workspace access or enable generic runtime reads.
+  directory to workspace access or enable generic runtime reads. Readable
+  results require the exact Manager-built diagnostic helper sealed during an
+  approved installation; otherwise the diagnostic tools fail closed.
 
 For least privilege, create a restricted runtime API key and enable only
 **Tunnels → All selected**. The secret value is shown only once by OpenAI. The
@@ -89,7 +94,27 @@ account with DPAPI and stores it at:
 Changing Codex diagnostics takes effect only after the existing controlled
 connector restart. The Manager includes its saved `off`/`read` value in the
 connector arguments and refuses external-process takeover when it does not
-match. Read-only diagnostics are synthetic-test coverage only; they do not
+match. In `read` mode it also refuses to use or take over an external connector
+because that process's helper environment cannot be verified.
+
+The build produces `CodexProSafe.DiagnosticHelper.exe` and an exact SHA-256
+manifest beside the Manager. The installer copies both files to the same
+per-user application directory and runs the Manager's noninteractive sealing
+mode, which persists the helper path, protocol, and fingerprint inside the
+existing DPAPI-protected settings. On connector start, the Manager verifies the
+saved values and file bytes while retaining a no-delete lock, then supplies the
+contract through the connector environment. The connector never searches
+`PATH`, and the helper never accepts a path argument. The package directory and
+helper executable are opened without following reparse points; redirected,
+unexpected-type, or multi-link package objects are rejected before launch.
+
+This SHA-256 binding is an app-local substitution check, not a general
+code-signing root. It assumes the Manager executable, its controlled launch
+contract, and the current user's DPAPI-protected settings remain trusted. An
+actor able to replace both that launch contract and the protected settings is
+outside this boundary.
+
+Read-only diagnostics are synthetic-test coverage only; they do not
 verify or inspect this user's live runtime during installation, and maintenance
 operations are not part of the setting.
 

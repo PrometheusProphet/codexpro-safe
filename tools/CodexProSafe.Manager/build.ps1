@@ -17,6 +17,32 @@ if (-not (Test-Path -LiteralPath $compiler)) {
 
 New-Item -ItemType Directory -Force -Path $bin, $obj | Out-Null
 
+$helperSources = @(
+    (Join-Path $project 'DiagnosticHelper\Program.cs')
+)
+$helperOutput = Join-Path $bin 'CodexProSafe.DiagnosticHelper.exe'
+& $compiler /nologo /target:exe /platform:anycpu /optimize+ /warn:4 `
+    ('/out:' + $helperOutput) '/reference:System.dll' '/reference:System.Core.dll' `
+    '/reference:System.Web.Extensions.dll' $helperSources
+if ($LASTEXITCODE -ne 0) {
+    throw "Diagnostic helper compilation failed with exit code $LASTEXITCODE."
+}
+
+if (-not $SkipSelfTest) {
+    $helperTest = Start-Process -FilePath $helperOutput -ArgumentList '--self-test' -Wait -PassThru -WindowStyle Hidden
+    if ($helperTest.ExitCode -ne 0) {
+        throw "Diagnostic helper self-test failed with exit code $($helperTest.ExitCode)."
+    }
+}
+
+$helperHash = (Get-FileHash -LiteralPath $helperOutput -Algorithm SHA256).Hash.ToLowerInvariant()
+$helperManifest = Join-Path $bin 'CodexProSafe.DiagnosticHelper.json'
+[pscustomobject]@{
+    protocolVersion = 'codexpro-diagnostic-v1'
+    executable = 'CodexProSafe.DiagnosticHelper.exe'
+    sha256 = $helperHash
+} | ConvertTo-Json -Compress | Set-Content -LiteralPath $helperManifest -Encoding UTF8
+
 $sources = Get-ChildItem -LiteralPath $project -Filter '*.cs' |
     Sort-Object Name |
     ForEach-Object { $_.FullName }
@@ -53,5 +79,7 @@ $hash = Get-FileHash -LiteralPath $output -Algorithm SHA256
 [pscustomobject]@{
     Executable = $output
     Sha256 = $hash.Hash.ToLowerInvariant()
+    DiagnosticHelper = $helperOutput
+    DiagnosticHelperSha256 = $helperHash
     SelfTest = if ($SkipSelfTest) { 'skipped' } else { 'passed' }
 }

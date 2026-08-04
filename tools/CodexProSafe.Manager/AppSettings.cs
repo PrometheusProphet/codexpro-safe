@@ -19,6 +19,9 @@ namespace CodexProSafeManager
         public bool AutoStartServices { get; set; }
         public bool RestartOnFailure { get; set; }
         public string CodexDiagnosticReadMode { get; set; }
+        public string DiagnosticHelperPath { get; set; }
+        public string DiagnosticHelperProtocolVersion { get; set; }
+        public string DiagnosticHelperSha256 { get; set; }
 
         public static AppSettings CreateDefaults()
         {
@@ -40,7 +43,10 @@ namespace CodexProSafeManager
                 StartMinimized = false,
                 AutoStartServices = false,
                 RestartOnFailure = true,
-                CodexDiagnosticReadMode = "off"
+                CodexDiagnosticReadMode = "off",
+                DiagnosticHelperPath = String.Empty,
+                DiagnosticHelperProtocolVersion = String.Empty,
+                DiagnosticHelperSha256 = String.Empty
             };
         }
 
@@ -56,6 +62,9 @@ namespace CodexProSafeManager
             if (ControlPlaneApiKey == null) ControlPlaneApiKey = String.Empty;
             if (OrganizationId == null) OrganizationId = String.Empty;
             if (String.IsNullOrWhiteSpace(CodexDiagnosticReadMode)) CodexDiagnosticReadMode = "off";
+            if (DiagnosticHelperPath == null) DiagnosticHelperPath = String.Empty;
+            if (DiagnosticHelperProtocolVersion == null) DiagnosticHelperProtocolVersion = String.Empty;
+            if (DiagnosticHelperSha256 == null) DiagnosticHelperSha256 = String.Empty;
         }
 
         public string ValidateForConnector()
@@ -70,6 +79,14 @@ namespace CodexProSafeManager
             if (!Directory.Exists(AllowedRoot)) return "Allowed root was not found at " + AllowedRoot;
             if (CodexDiagnosticReadMode != "off" && CodexDiagnosticReadMode != "read")
                 return "Codex diagnostic read mode must be off or read.";
+            if (CodexDiagnosticReadMode == "read")
+            {
+                if (!File.Exists(DiagnosticHelperPath)) return "The sealed diagnostic helper is missing. Reinstall the Manager before enabling diagnostics.";
+                if (DiagnosticHelperProtocolVersion != DiagnosticHelperTrust.ProtocolVersion)
+                    return "The diagnostic helper protocol does not match this Manager build. Reinstall the Manager.";
+                if (String.IsNullOrWhiteSpace(DiagnosticHelperSha256) || DiagnosticHelperSha256.Length != 64)
+                    return "The diagnostic helper fingerprint is missing. Reinstall the Manager before enabling diagnostics.";
+            }
             return null;
         }
 

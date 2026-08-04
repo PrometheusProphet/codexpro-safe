@@ -43,6 +43,11 @@ The executable is generated at:
 tools\CodexProSafe.Manager\bin\CodexProSafe.Manager.exe
 ```
 
+The same build explicitly compiles and self-tests the app-local diagnostic
+companion at `bin\CodexProSafe.DiagnosticHelper.exe`, then writes its protocol
+and SHA-256 manifest. The helper is a narrow fixed-root Win32 boundary; it is
+not installed globally and is never resolved through `PATH`.
+
 ## First run
 
 1. Open **Settings**.
@@ -60,7 +65,9 @@ root, tunnel mode, handoff mode, and saved Codex diagnostic mode match.
 
 Codex diagnostics default to **Off**. **Read-only** enables only fixed-root,
 metadata-only diagnostics and does not grant generic home/runtime access or any
-maintenance action. A setting change takes effect through **Restart All**.
+maintenance action. The installed Manager seals and verifies its companion
+helper in DPAPI-protected settings and refuses unverified external connectors
+in this mode. A setting change takes effect through **Restart All**.
 
 After takeover, use **Start All**, **Restart All**, and **Stop All** from either
 the main window or the notification-area menu. Closing the window minimizes it.
@@ -90,3 +97,7 @@ The installed application lives under:
 ```text
 %LOCALAPPDATA%\Programs\CodexProSafe Manager
 ```
+
+That directory also contains the exact diagnostic helper and build manifest.
+Installation seals their contract but does not start diagnostics, restart live
+services, inspect `~/.codex`, or establish plugin callability by itself.
