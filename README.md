@@ -1158,7 +1158,9 @@ The same app-local helper also has a separate, source-only Windows transport
 for a future maintenance adapter. `codexpro-maintenance-fs-v1` binds one exact
 local NTFS root privately and performs bounded handle-relative walks and
 ID-only file reads; it is not registered through MCP and is not integrated or
-live-activated. See [Maintenance filesystem provider](docs/MAINTENANCE_FILESYSTEM_PROVIDER.md).
+live-activated. Consumers compile the reusable native launcher source into
+their own trusted application package; they do not verify and directly spawn
+the external helper by pathname. See [Maintenance filesystem provider](docs/MAINTENANCE_FILESYSTEM_PROVIDER.md).
 
 By default the bash environment is sanitized. To inherit your full local environment:
 

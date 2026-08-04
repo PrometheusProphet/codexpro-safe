@@ -11,7 +11,12 @@ internal static class MaintenanceFsClientFixture
 
     private static int Main(string[] args)
     {
+#if HELPER_TIMEOUT
         if (args.Length != 1 || args[0] != "--serve-maintenance-fs") return 2;
+        Thread.Sleep(30000);
+        return 4;
+#else
+        if (args.Length != 1 || args[0] != "--serve") return 2;
         Stream input = Console.OpenStandardInput();
         Stream output = Console.OpenStandardOutput();
 #if UNSOLICITED
@@ -37,7 +42,8 @@ internal static class MaintenanceFsClientFixture
             string operation = request["operation"] as string;
             if (count == 1)
             {
-                if (operation != "bind_root" || !request.ContainsKey("root") || args[0].Contains(request["root"] as string)) return 5;
+                if (operation != "bootstrap" || !request.ContainsKey("root") || !request.ContainsKey("manifestPath") ||
+                    !request.ContainsKey("expectedManifestSha256") || args[0].Contains(request["root"] as string)) return 5;
                 foreach (System.Collections.DictionaryEntry item in Environment.GetEnvironmentVariables())
                     if (String.Equals(item.Value as string, request["root"] as string, StringComparison.Ordinal)) return 6;
 #if OVERSIZED
@@ -80,6 +86,7 @@ internal static class MaintenanceFsClientFixture
             }
 #endif
         }
+#endif
     }
 
     private static byte[] Read(Stream stream, int length, bool cleanEof)

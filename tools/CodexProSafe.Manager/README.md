@@ -53,7 +53,13 @@ tools\CodexProSafe.Manager\bin\CodexProSafe.Manager.exe
 
 The same build explicitly compiles and self-tests the app-local diagnostic
 companion at `bin\CodexProSafe.DiagnosticHelper.exe`, then writes its protocols
-and SHA-256 manifest. Its existing fixed-root diagnostic mode remains separate
+and SHA-256 manifest. It also compiles and self-tests
+`bin\CodexProSafe.MaintenanceFsLauncher.exe` for the synthetic provider proof.
+The reusable launcher sources live in the separate
+`tools\CodexProSafe.MaintenanceFsLauncher` owner and are intended to be
+provenance-recorded and compiled into a downstream caller's trusted package;
+the generated test binary is not installed or activated by this source task.
+The helper's existing fixed-root diagnostic mode remains separate
 from the source-only `--serve-maintenance-fs` local NTFS transport documented in
 [Maintenance filesystem provider](../../docs/MAINTENANCE_FILESYSTEM_PROVIDER.md).
 Neither mode is installed globally or resolved through `PATH`.

@@ -6,6 +6,13 @@ future Routine Maintenance adapter. Its protocol is
 `CodexProSafe.DiagnosticHelper.exe --serve-maintenance-fs` process. It is a
 separate mode from `--serve` and does not change `codexpro-diagnostic-v1`.
 
+Consumers do not launch that external helper directly. The prior provisional
+TypeScript verify-by-path-then-spawn contract was removed because replacement
+could race the pathname check. A trusted caller instead compiles/adapts the
+native sources in `tools/CodexProSafe.MaintenanceFsLauncher/` into its own
+application package and starts its trusted launcher with the sole production
+argument `--serve`.
+
 The provider is local-only. It creates no listener, service, scheduled task,
 startup entry, elevated process, connector route, MCP tool, or workspace root.
 In particular, an arbitrary root must never be exposed through MCP.
@@ -106,16 +113,55 @@ schema/status inconsistency as failure.
 The build emits the same app-local helper and public manifest. Existing fields
 remain `protocolVersion`, `executable`, and `sha256`; the additive
 `maintenanceFsProtocolVersion` is fixed to `codexpro-maintenance-fs-v1`.
-`src/windowsMaintenanceFsBoundary.ts` verifies the helper bytes before launch,
-uses only `--serve-maintenance-fs` with `shell: false` and a minimal environment,
-binds the root in the first private frame, serializes requests, validates exact
-responses, enforces timeouts, and terminates on failure.
+
+The trust model has three explicit roles:
+
+1. The consuming application and maintenance launcher compiled into that
+   application's trusted package are the trusted caller package.
+2. The external Manager manifest and helper remain mutable input until the
+   launcher opens, validates, hashes, and locks them.
+3. The inspected root is caller-selected policy and crosses only the private
+   bootstrap pipe before the helper binds it once.
+
+The launcher accepts one strict, bounded first frame under
+`codexpro-maintenance-fs-launcher-v1`:
+
+```json
+{"protocol":"codexpro-maintenance-fs-launcher-v1","operation":"bootstrap","manifestPath":"C:\\exact\\CodexProSafe.DiagnosticHelper.json","expectedManifestSha256":"<lowercase-sha256>","expectedMaintenanceProtocol":"codexpro-maintenance-fs-v1","root":"C:\\exact\\root"}
+```
+
+It opens the package directory, manifest, and fixed helper basename with native
+handle-relative operations; rejects reparse, non-disk, redirected, multi-link,
+or identity-mismatched objects; hashes through retained handles; and denies
+write/delete/rename while calling `CreateProcessW`. It verifies the child image
+path and file identity, revalidates the locked files after creation, and keeps
+all trust handles until the child and relay have ended. A kill-on-close job
+terminates the helper if the launcher is killed or its parent disconnects.
+After the private one-shot root bind, the launcher relays the existing framed
+maintenance protocol without adding filesystem policy. Each child response has
+a fixed deadline while the launcher concurrently monitors parent-pipe EOF and
+queued-frame violations; timeout or disconnect terminates the job and releases
+the package locks.
+
+`src/windowsMaintenanceFsBoundary.ts` clearly separates
+`trustedLauncherPath` from the external `manifestPath` and
+`expectedManifestSha256`, sends those external values and the root only in the
+bootstrap frame, launches only `--serve` with `shell: false` and a minimal
+environment, preserves exact response validation and timeouts, and never falls
+back to direct helper launch.
+
+The exact reusable source set is `StrictJson.cs`, `PackageTrust.cs`,
+`NativeChild.cs`, and `Program.cs` under
+`tools/CodexProSafe.MaintenanceFsLauncher/`. A downstream adaptation must record
+the source path, exact CodexPro-Safe commit, MIT license, every local
+modification, and the tests used. Hashing an arbitrary launcher pathname just
+before ordinary process creation is not an adequate trust root.
 
 The future maintenance caller owns its root allowlist, policy, classification,
 redaction, persistence, reporting, remediation, and scheduling. This repository
 does not select roots or persist snapshots. This source task did not install or
-activate the provider on a live Manager.
+activate the provider or launcher on a live Manager.
 
-Rollback is additive: omit or disable the maintenance launch mode and client.
+Rollback is additive: omit or disable the maintenance launcher and client.
 The existing `--serve` fixed diagnostic behavior and its MCP profile remain
 unchanged.

@@ -30,6 +30,7 @@
     "dist",
     "docs",
     "scripts",
+    "tools/CodexProSafe.MaintenanceFsLauncher",
     "README.md",
     "README_ZH.md",
     "PUBLIC_LAUNCH_CHECKLIST.md",

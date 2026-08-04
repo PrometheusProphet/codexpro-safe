@@ -1,9 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
-import fs from "node:fs/promises";
 import path from "node:path";
 
 export const MAINTENANCE_FS_PROTOCOL = "codexpro-maintenance-fs-v1";
+export const MAINTENANCE_FS_LAUNCHER_PROTOCOL = "codexpro-maintenance-fs-launcher-v1";
 export const MAINTENANCE_FS_LIMITS = Object.freeze({
   maxDepth: 64,
   maxEntries: 4096,
@@ -58,9 +58,10 @@ export interface MaintenanceFileResult {
 }
 
 export interface WindowsMaintenanceFsBoundaryOptions {
-  executablePath: string;
-  expectedSha256: string;
-  expectedProtocol: typeof MAINTENANCE_FS_PROTOCOL;
+  trustedLauncherPath: string;
+  manifestPath: string;
+  expectedManifestSha256: string;
+  expectedMaintenanceProtocol: typeof MAINTENANCE_FS_PROTOCOL;
   rootPath: string;
   defaultWalkBudgets?: Partial<MaintenanceWalkBudgets>;
 }
@@ -80,9 +81,10 @@ interface PendingResponse {
 }
 
 export class ManagedWindowsMaintenanceFsBoundary implements WindowsMaintenanceFsBoundary {
-  private readonly executablePath: string;
-  private readonly expectedSha256: string;
-  private readonly expectedProtocol: typeof MAINTENANCE_FS_PROTOCOL;
+  private readonly trustedLauncherPath: string;
+  private readonly manifestPath: string;
+  private readonly expectedManifestSha256: string;
+  private readonly expectedMaintenanceProtocol: typeof MAINTENANCE_FS_PROTOCOL;
   private readonly rootPath: string;
   private readonly defaultWalkBudgets: Partial<MaintenanceWalkBudgets>;
   private readonly readyPromise: Promise<void>;
@@ -95,9 +97,10 @@ export class ManagedWindowsMaintenanceFsBoundary implements WindowsMaintenanceFs
   private sequence: Promise<unknown> = Promise.resolve();
 
   constructor(options: WindowsMaintenanceFsBoundaryOptions) {
-    this.executablePath = resolveHelperExecutable(options.executablePath);
-    this.expectedSha256 = String(options.expectedSha256);
-    this.expectedProtocol = options.expectedProtocol;
+    this.trustedLauncherPath = resolveLocalExecutable(options.trustedLauncherPath, "launcher");
+    this.manifestPath = resolveLocalExecutable(options.manifestPath, "manifest");
+    this.expectedManifestSha256 = String(options.expectedManifestSha256);
+    this.expectedMaintenanceProtocol = options.expectedMaintenanceProtocol;
     this.rootPath = String(options.rootPath);
     this.defaultWalkBudgets = Object.freeze({ ...(options.defaultWalkBudgets ?? {}) });
     this.readyPromise = this.start().catch((error: unknown) => {
@@ -147,17 +150,13 @@ export class ManagedWindowsMaintenanceFsBoundary implements WindowsMaintenanceFs
   }
 
   private async start(): Promise<void> {
-    if (this.expectedProtocol !== MAINTENANCE_FS_PROTOCOL) throw new Error("maintenance filesystem helper protocol mismatch");
+    if (this.expectedMaintenanceProtocol !== MAINTENANCE_FS_PROTOCOL) throw new Error("maintenance filesystem helper protocol mismatch");
     if (process.platform !== "win32") throw new Error("maintenance filesystem helper unavailable");
-    let executable: Buffer;
-    try { executable = await fs.readFile(this.executablePath); }
-    catch { throw new Error("maintenance filesystem helper unavailable"); }
-    const actualHash = createHash("sha256").update(executable).digest("hex");
-    if (!/^[a-f0-9]{64}$/.test(this.expectedSha256) || actualHash !== this.expectedSha256) throw new Error("maintenance filesystem helper fingerprint mismatch");
+    if (!/^[a-f0-9]{64}$/.test(this.expectedManifestSha256)) throw new Error("maintenance filesystem manifest fingerprint mismatch");
 
     const allowedEnvironment = ["SystemRoot", "WINDIR", "TEMP", "TMP"];
     const environment = Object.fromEntries(allowedEnvironment.flatMap((name) => process.env[name] ? [[name, process.env[name]!]] : []));
-    const child = spawn(this.executablePath, ["--serve-maintenance-fs"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, shell: false, env: environment });
+    const child = spawn(this.trustedLauncherPath, ["--serve"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, shell: false, env: environment });
     this.child = child;
     child.stdout.on("data", (chunk: Buffer) => this.receive(chunk));
     child.stderr.on("data", (chunk: Buffer) => {
@@ -167,7 +166,14 @@ export class ManagedWindowsMaintenanceFsBoundary implements WindowsMaintenanceFs
     child.on("error", () => this.fail(new Error("maintenance filesystem helper failed to start")));
     child.on("exit", () => this.fail(new Error("maintenance filesystem helper exited")));
 
-    const bind = await this.enqueue({ protocol: MAINTENANCE_FS_PROTOCOL, operation: "bind_root", root: this.rootPath });
+    const bind = await this.enqueue({
+      protocol: MAINTENANCE_FS_LAUNCHER_PROTOCOL,
+      operation: "bootstrap",
+      manifestPath: this.manifestPath,
+      expectedManifestSha256: this.expectedManifestSha256,
+      expectedMaintenanceProtocol: this.expectedMaintenanceProtocol,
+      root: this.rootPath,
+    });
     validateStatus(bind, "bind_root", new Set(["ok"]));
     const handshake = await this.enqueue({ protocol: MAINTENANCE_FS_PROTOCOL, operation: "handshake" });
     validateHandshake(handshake);
@@ -348,11 +354,12 @@ function responseSize(value: Record<string, any>): number {
   return size;
 }
 
-function resolveHelperExecutable(value: string): string {
+function resolveLocalExecutable(value: string, owner: "launcher" | "manifest"): string {
   if (typeof value !== "string" || !/^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\") || !path.win32.isAbsolute(value))
-    throw new Error("maintenance filesystem helper path mismatch");
+    throw new Error(`maintenance filesystem ${owner} path mismatch`);
   const resolved = path.win32.normalize(value);
-  if (!/^[A-Za-z]:\\/.test(resolved) || resolved.includes("\0")) throw new Error("maintenance filesystem helper path mismatch");
+  if (!/^[A-Za-z]:\\/.test(resolved) || resolved.includes("\0") || resolved.startsWith("\\\\?\\") || resolved.startsWith("\\\\.\\") || resolved.slice(2).includes(":"))
+    throw new Error(`maintenance filesystem ${owner} path mismatch`);
   return resolved;
 }
 

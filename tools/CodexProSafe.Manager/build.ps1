@@ -43,6 +43,32 @@ if (-not $SkipSelfTest) {
     }
 }
 
+$launcherProject = Join-Path $project '..\CodexProSafe.MaintenanceFsLauncher'
+$launcherSources = @(
+    (Join-Path $launcherProject 'StrictJson.cs'),
+    (Join-Path $launcherProject 'PackageTrust.cs'),
+    (Join-Path $launcherProject 'NativeChild.cs'),
+    (Join-Path $launcherProject 'Program.cs')
+)
+foreach ($launcherSource in $launcherSources) {
+    if (-not (Test-Path -LiteralPath $launcherSource -PathType Leaf)) {
+        throw "Missing maintenance filesystem launcher source: $launcherSource"
+    }
+}
+$launcherOutput = Join-Path $bin 'CodexProSafe.MaintenanceFsLauncher.exe'
+& $compiler /nologo /target:exe /platform:anycpu /optimize+ /warn:4 `
+    ('/out:' + $launcherOutput) '/reference:System.dll' '/reference:System.Core.dll' `
+    '/reference:System.Web.Extensions.dll' $launcherSources
+if ($LASTEXITCODE -ne 0) {
+    throw "Maintenance filesystem launcher compilation failed with exit code $LASTEXITCODE."
+}
+if (-not $SkipSelfTest) {
+    $launcherTest = Start-Process -FilePath $launcherOutput -ArgumentList '--self-test' -Wait -PassThru -WindowStyle Hidden
+    if ($launcherTest.ExitCode -ne 0) {
+        throw "Maintenance filesystem launcher self-test failed with exit code $($launcherTest.ExitCode)."
+    }
+}
+
 $helperHash = (Get-FileHash -LiteralPath $helperOutput -Algorithm SHA256).Hash.ToLowerInvariant()
 $helperManifest = Join-Path $bin 'CodexProSafe.DiagnosticHelper.json'
 [pscustomobject]@{

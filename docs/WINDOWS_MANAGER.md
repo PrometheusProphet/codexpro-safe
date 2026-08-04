@@ -173,6 +173,12 @@ protocol and additively declares the source-only
 local NTFS root through private stdin and is not a Manager setting, connector
 tool, live activation, or arbitrary-root MCP surface. See
 [Maintenance filesystem provider](MAINTENANCE_FILESYSTEM_PROVIDER.md).
+The source build also produces a synthetic-test maintenance launcher from the
+explicit reusable source set under `tools/CodexProSafe.MaintenanceFsLauncher`.
+Downstream callers must compile/adapt that source into their own trusted package
+with an exact provenance record; hashing and ordinarily spawning an arbitrary
+launcher path is not sufficient. The launcher test binary is not part of the
+Manager installation contract.
 The installer copies both files to the same
 per-user application directory and runs the Manager's noninteractive sealing
 mode, which persists the helper path, protocol, and fingerprint inside the

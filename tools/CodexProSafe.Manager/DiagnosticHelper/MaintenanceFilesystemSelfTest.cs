@@ -73,9 +73,13 @@ namespace CodexProSafeDiagnosticHelper
                         if (relative != "race") return;
                         MaintenanceFilesystemTestHooks.BeforeAncestorOpen = null;
                         Directory.Move(race, raceBackup);
-                        Directory.Move(raceBackup, race);
+                        Directory.CreateDirectory(race);
+                        File.WriteAllText(Path.Combine(race, "nested.txt"), "decoy");
                     };
-                    if (provider.ReadTextFile(nested.entryId, 1024).status != "changed") return 27;
+                    string ancestorStatus = provider.ReadTextFile(nested.entryId, 1024).status;
+                    Directory.Delete(race, true);
+                    Directory.Move(raceBackup, race);
+                    if (ancestorStatus != "changed") return 27;
 
                     MaintenanceWalkResponse changingSnapshot = provider.Walk(DefaultWalk());
                     MaintenanceEntry changing = changingSnapshot.entries.Single(item => item.relativePath == "changing.txt");

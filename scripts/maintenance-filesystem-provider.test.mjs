@@ -12,13 +12,18 @@ import {
 
 if (process.platform === 'win32') {
     const helper = path.resolve('tools/CodexProSafe.Manager/bin/CodexProSafe.DiagnosticHelper.exe');
+    const launcher = path.resolve('tools/CodexProSafe.Manager/bin/CodexProSafe.MaintenanceFsLauncher.exe');
+    const manifestPath = path.resolve('tools/CodexProSafe.Manager/bin/CodexProSafe.DiagnosticHelper.json');
     const helperHash = createHash('sha256').update(await fs.readFile(helper)).digest('hex');
-    const manifest = JSON.parse((await fs.readFile(path.resolve('tools/CodexProSafe.Manager/bin/CodexProSafe.DiagnosticHelper.json'), 'utf8')).replace(/^\uFEFF/, ''));
+    const manifestBytes = await fs.readFile(manifestPath);
+    const manifestHash = createHash('sha256').update(manifestBytes).digest('hex');
+    const manifest = JSON.parse(manifestBytes.toString('utf8').replace(/^\uFEFF/, ''));
     assert.deepEqual(Object.keys(manifest).sort(), ['executable', 'maintenanceFsProtocolVersion', 'protocolVersion', 'sha256']);
     assert.deepEqual(manifest, { protocolVersion: 'codexpro-diagnostic-v1', maintenanceFsProtocolVersion: MAINTENANCE_FS_PROTOCOL, executable: 'CodexProSafe.DiagnosticHelper.exe', sha256: helperHash });
     const installer = await fs.readFile(path.resolve('tools/CodexProSafe.Manager/install.ps1'), 'utf8');
     assert.match(installer, /CodexProSafe\.DiagnosticHelper\.json/);
-    assert.throws(() => new ManagedWindowsMaintenanceFsBoundary({ executablePath: 'CodexProSafe.DiagnosticHelper.exe', expectedSha256: helperHash, expectedProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: os.tmpdir() }), /path mismatch/);
+    assert.equal(installer.includes('CodexProSafe.MaintenanceFsLauncher.exe'), false, 'synthetic launcher must not enter Manager installation');
+    assert.throws(() => new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: 'CodexProSafe.MaintenanceFsLauncher.exe', manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: os.tmpdir() }), /path mismatch/);
     const originalRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-maintenance-fs-test-'));
     const fixtureDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-maintenance-client-fixture-'));
     let retainedRoot = originalRoot;
@@ -33,7 +38,7 @@ if (process.platform === 'win32') {
       await Promise.all(Array.from({ length: 750 }, (_, index) => fs.writeFile(path.join(originalRoot, 'duration', `entry-${index.toString().padStart(4, '0')}.txt`), 'x')));
       await fs.symlink(path.join(originalRoot, 'nested'), path.join(originalRoot, 'junction'), 'junction');
 
-      const boundary = new ManagedWindowsMaintenanceFsBoundary({ executablePath: helper, expectedSha256: helperHash, expectedProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
+      const boundary = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: launcher, manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
       await boundary.ready();
       for (const invalid of [
         { maxDepth: 0 }, { maxDepth: 65 }, { maxDepth: 1.5 },
@@ -103,14 +108,14 @@ if (process.platform === 'win32') {
       await boundary.close();
       await boundary.close();
 
-      const wrongFingerprint = new ManagedWindowsMaintenanceFsBoundary({ executablePath: helper, expectedSha256: '0'.repeat(64), expectedProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
-      await assert.rejects(wrongFingerprint.ready(), /fingerprint mismatch/);
-      const wrongProtocol = new ManagedWindowsMaintenanceFsBoundary({ executablePath: helper, expectedSha256: helperHash, expectedProtocol: 'wrong', rootPath: originalRoot });
+      const wrongFingerprint = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: launcher, manifestPath, expectedManifestSha256: '0'.repeat(64), expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
+      await assert.rejects(wrongFingerprint.ready(), /exited|unavailable/);
+      const wrongProtocol = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: launcher, manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: 'wrong', rootPath: originalRoot });
       await assert.rejects(wrongProtocol.ready(), /protocol mismatch/);
 
-      const capturedOptions = { executablePath: helper, expectedSha256: helperHash, expectedProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot };
+      const capturedOptions = { trustedLauncherPath: launcher, manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot };
       const capturedBoundary = new ManagedWindowsMaintenanceFsBoundary(capturedOptions);
-      capturedOptions.expectedSha256 = '0'.repeat(64);
+      capturedOptions.expectedManifestSha256 = '0'.repeat(64);
       capturedOptions.rootPath = 'C:\\missing-mutated-root';
       const savedCwd = process.cwd();
       process.chdir(os.tmpdir());
@@ -120,7 +125,7 @@ if (process.platform === 'win32') {
       const fixtureSource = path.resolve('scripts/fixtures/MaintenanceFsClientFixture.cs');
       for (const [name, define] of [['schema', 'SCHEMA'], ['version', 'VERSION'], ['oversized', 'OVERSIZED'], ['incomplete', 'INCOMPLETE'], ['concatenated', 'CONCATENATED'], ['unsolicited', 'UNSOLICITED']]) {
         const responseFixture = compileClientFixture(fixtureDirectory, fixtureSource, name, define);
-        const responseBoundary = new ManagedWindowsMaintenanceFsBoundary({ executablePath: responseFixture, expectedSha256: await sha256File(responseFixture), expectedProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
+        const responseBoundary = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: responseFixture, manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
         const rejection = await responseBoundary.ready().then(() => null, (error) => error);
         assert.ok(rejection instanceof Error, `${name} response must fail`);
         assert.equal(String(rejection).includes(originalRoot), false, `${name} failure must not disclose root`);
@@ -128,20 +133,20 @@ if (process.platform === 'win32') {
       }
 
       const mismatchFixture = compileClientFixture(fixtureDirectory, fixtureSource, 'mismatch', 'MISMATCH');
-      const mismatchBoundary = new ManagedWindowsMaintenanceFsBoundary({ executablePath: mismatchFixture, expectedSha256: await sha256File(mismatchFixture), expectedProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
+      const mismatchBoundary = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: mismatchFixture, manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
       await mismatchBoundary.ready();
       await assert.rejects(mismatchBoundary.walk({ maxEntries: 1, maxObservedBytes: 1 }), /entry count mismatch|integer mismatch/);
       await mismatchBoundary.close().catch(() => undefined);
 
       const fileFixture = compileClientFixture(fixtureDirectory, fixtureSource, 'file', null);
-      const fileBoundary = new ManagedWindowsMaintenanceFsBoundary({ executablePath: fileFixture, expectedSha256: await sha256File(fileFixture), expectedProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
+      const fileBoundary = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: fileFixture, manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
       await fileBoundary.ready();
       const fixtureWalk = await fileBoundary.walk({ maxEntries: 1, maxObservedBytes: 1 });
       await assert.rejects(fileBoundary.hashFile(fixtureWalk.entries[0].entryId, 1), /entry ID mismatch/);
       await fileBoundary.close().catch(() => undefined);
 
       const timeoutFixture = compileClientFixture(fixtureDirectory, fixtureSource, 'timeout', 'TIMEOUT');
-      const timeoutBoundary = new ManagedWindowsMaintenanceFsBoundary({ executablePath: timeoutFixture, expectedSha256: await sha256File(timeoutFixture), expectedProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
+      const timeoutBoundary = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: timeoutFixture, manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
       await assert.rejects(timeoutBoundary.ready(), /timeout/);
       await fs.rm(timeoutFixture, { force: true, maxRetries: 10, retryDelay: 100 });
 
@@ -162,6 +167,33 @@ if (process.platform === 'win32') {
         assert.equal(malformed.stderr.length, 0);
         assert.equal(malformed.stdout.includes(Buffer.from(originalRoot, 'utf8')), false);
       }
+
+      const launcherBootstrap = { protocol: 'codexpro-maintenance-fs-launcher-v1', operation: 'bootstrap', manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, root: originalRoot };
+      const launcherFailures = [
+        Buffer.from([0, 0, 0, 0]),
+        Buffer.from([0x01, 0x20, 0, 0]),
+        framed({ ...launcherBootstrap, extra: true }),
+        framed({ ...launcherBootstrap, protocol: 'wrong' }),
+        framedJson(JSON.stringify(launcherBootstrap).replace(/}$/, ',"root":"duplicate"}')),
+        Buffer.concat([framed(launcherBootstrap), framed({ protocol: MAINTENANCE_FS_PROTOCOL, operation: 'handshake' })]),
+        ...Object.keys(launcherBootstrap).map((omitted) => framed(Object.fromEntries(Object.entries(launcherBootstrap).filter(([key]) => key !== omitted)))),
+        ...['relative.json', '\\\\server\\share\\manifest.json', '\\\\?\\C:\\package\\manifest.json', 'C:\\package\\manifest.json:stream']
+          .map((invalidManifestPath) => framed({ ...launcherBootstrap, manifestPath: invalidManifestPath })),
+      ];
+      for (const bytes of launcherFailures) {
+        const malformed = await runRawLauncher(launcher, bytes);
+        assert.notEqual(malformed.code, 0);
+        assert.equal(malformed.stderr.length, 0);
+        for (const privateValue of [originalRoot, manifestPath, manifestHash]) assert.equal(Buffer.concat([malformed.stdout, malformed.stderr]).includes(Buffer.from(privateValue)), false);
+      }
+      const disconnected = await runRawLauncher(launcher, framed(launcherBootstrap));
+      assert.ok(disconnected.code === 0 || disconnected.code === 5, 'parent disconnect must use a fixed launcher exit');
+      assert.ok(disconnected.durationMs < 3000, `disconnect containment exceeded bound: ${disconnected.durationMs}ms`);
+      assert.equal(disconnected.stderr.length, 0);
+      for (const privateValue of [originalRoot, manifestPath, manifestHash]) assert.equal(disconnected.stdout.includes(Buffer.from(privateValue)), false);
+
+      await runPackageRejectionCases({ launcher, sourceHelper: helper, root: retainedRoot });
+      await runChildFailureCases({ launcher, fixtureDirectory, fixtureSource, root: retainedRoot });
     } finally {
       await fs.rm(originalRoot, { recursive: true, force: true });
       if (retainedRoot !== originalRoot) await fs.rm(retainedRoot, { recursive: true, force: true });
@@ -173,10 +205,17 @@ if (process.platform === 'win32') {
   for (const name of sourceFiles) assert.equal((await fs.readFile(path.resolve('src', name), 'utf8')).includes(MAINTENANCE_FS_PROTOCOL), false, `${name} must not register maintenance protocol`);
   const packageJson = JSON.parse(await fs.readFile(path.resolve('package.json'), 'utf8'));
   assert.equal(JSON.stringify(packageJson.bin).includes('maintenance'), false, 'no generic maintenance command may be exposed');
+  assert.equal(packageJson.files.includes('tools/CodexProSafe.MaintenanceFsLauncher'), true, 'reusable launcher source must be package-owned');
+  const clientSource = await fs.readFile(path.resolve('src/windowsMaintenanceFsBoundary.ts'), 'utf8');
+  assert.equal(clientSource.includes('spawn(this.executablePath'), false, 'client must not directly launch the external helper');
+  assert.equal(clientSource.includes('["--serve-maintenance-fs"]'), false, 'client must never fall back to direct helper mode');
+  assert.match(clientSource, /spawn\(this\.trustedLauncherPath, \["--serve"\]/);
   const maintenanceSources = await Promise.all([
-    fs.readFile(path.resolve('src/windowsMaintenanceFsBoundary.ts'), 'utf8'),
+    Promise.resolve(clientSource),
     fs.readFile(path.resolve('tools/CodexProSafe.Manager/DiagnosticHelper/MaintenanceProtocol.cs'), 'utf8'),
     fs.readFile(path.resolve('tools/CodexProSafe.Manager/DiagnosticHelper/MaintenanceFilesystemProvider.cs'), 'utf8'),
+    fs.readFile(path.resolve('tools/CodexProSafe.MaintenanceFsLauncher/Program.cs'), 'utf8'),
+    fs.readFile(path.resolve('tools/CodexProSafe.MaintenanceFsLauncher/NativeChild.cs'), 'utf8'),
   ]);
   const joinedMaintenanceSources = maintenanceSources.join('\n');
   for (const prohibited of ['HttpListener', 'TcpListener', 'NamedPipeServerStream', 'ProcessStartInfo.Verb', 'runas', 'schtasks']) assert.equal(joinedMaintenanceSources.includes(prohibited), false, `${prohibited} must not expand privilege or service surface`);
@@ -202,6 +241,86 @@ function runRawHelper(helper, bytes) {
     child.on('exit', (code) => resolve({ code, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) }));
     child.stdin.end(bytes);
   });
+}
+
+function runRawLauncher(launcher, bytes) {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const child = spawn(launcher, ['--serve'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on('data', (chunk) => stdout.push(chunk));
+    child.stderr.on('data', (chunk) => stderr.push(chunk));
+    child.on('error', reject);
+    child.on('exit', (code) => resolve({ code, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), durationMs: Date.now() - started }));
+    child.stdin.end(bytes);
+  });
+}
+
+async function runPackageRejectionCases({ launcher, sourceHelper, root }) {
+  async function createPackage() {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-launcher-package-'));
+    const helper = path.join(directory, 'CodexProSafe.DiagnosticHelper.exe');
+    const manifest = path.join(directory, 'CodexProSafe.DiagnosticHelper.json');
+    await fs.copyFile(sourceHelper, helper);
+    const sha256 = await sha256File(helper);
+    await fs.writeFile(manifest, JSON.stringify({ protocolVersion: 'codexpro-diagnostic-v1', maintenanceFsProtocolVersion: MAINTENANCE_FS_PROTOCOL, executable: 'CodexProSafe.DiagnosticHelper.exe', sha256 }));
+    return { directory, helper, manifest, manifestHash: await sha256File(manifest) };
+  }
+  async function rejectsPackage(value) {
+    const boundary = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: launcher, manifestPath: value.manifest, expectedManifestSha256: value.manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: root });
+    await assert.rejects(boundary.ready(), /exited|unavailable/);
+    await boundary.close().catch(() => undefined);
+  }
+
+  for (const mutation of [
+    async (value) => fs.writeFile(value.manifest, '{}'),
+    async (value) => fs.writeFile(value.helper, 'replacement'),
+    async (value) => fs.link(value.helper, path.join(value.directory, 'helper-hardlink.exe')),
+    async (value) => { await fs.unlink(value.manifest); const target = path.join(value.directory, 'manifest-junction-target'); await fs.mkdir(target); await fs.symlink(target, value.manifest, 'junction'); },
+    async (value) => { await fs.unlink(value.helper); const target = path.join(value.directory, 'helper-junction-target'); await fs.mkdir(target); await fs.symlink(target, value.helper, 'junction'); },
+  ]) {
+    const value = await createPackage();
+    try { await mutation(value); await rejectsPackage(value); }
+    finally { await fs.rm(value.directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+  }
+
+  const missing = await createPackage();
+  try {
+    await fs.unlink(missing.helper);
+    await rejectsPackage(missing);
+  } finally { await fs.rm(missing.directory, { recursive: true, force: true }); }
+}
+
+async function runChildFailureCases({ launcher, fixtureDirectory, fixtureSource, root }) {
+  async function packageHelper(source) {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-launcher-child-'));
+    const helper = path.join(directory, 'CodexProSafe.DiagnosticHelper.exe');
+    const manifest = path.join(directory, 'CodexProSafe.DiagnosticHelper.json');
+    await fs.copyFile(source, helper);
+    const sha256 = await sha256File(helper);
+    await fs.writeFile(manifest, JSON.stringify({ protocolVersion: 'codexpro-diagnostic-v1', maintenanceFsProtocolVersion: MAINTENANCE_FS_PROTOCOL, executable: 'CodexProSafe.DiagnosticHelper.exe', sha256 }));
+    return { directory, manifest, manifestHash: await sha256File(manifest) };
+  }
+  async function rejectAndUnlock(value, expected) {
+    const boundary = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: launcher, manifestPath: value.manifest, expectedManifestSha256: value.manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: root });
+    await assert.rejects(boundary.ready(), expected);
+    await fs.rm(value.directory, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
+  }
+
+  const invalidExecutable = path.join(fixtureDirectory, 'invalid-helper.exe');
+  await fs.writeFile(invalidExecutable, 'not a Windows executable');
+  await rejectAndUnlock(await packageHelper(invalidExecutable), /exited|unavailable/);
+
+  const hangingHelper = compileClientFixture(fixtureDirectory, fixtureSource, 'hanging-helper', 'HELPER_TIMEOUT');
+  const disconnectedPackage = await packageHelper(hangingHelper);
+  const disconnected = await runRawLauncher(launcher, framed({ protocol: 'codexpro-maintenance-fs-launcher-v1', operation: 'bootstrap', manifestPath: disconnectedPackage.manifest, expectedManifestSha256: disconnectedPackage.manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, root }));
+  assert.notEqual(disconnected.code, 0);
+  assert.equal(disconnected.stderr.length, 0);
+  assert.ok(disconnected.durationMs < 3000, `disconnect containment exceeded bound: ${disconnected.durationMs}ms`);
+  await fs.rm(disconnectedPackage.directory, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
+
+  await rejectAndUnlock(await packageHelper(hangingHelper), /timeout|exited/);
 }
 
 function compileClientFixture(directory, source, name, define) {
