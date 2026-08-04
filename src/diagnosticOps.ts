@@ -15,6 +15,7 @@ const MAX_DATABASE_BYTES = 32 * 1024 * 1024;
 const OPERATION_TIMEOUT_MS = 3_000;
 const CONFIG_FILES = ["config.toml", "config.toml.bak", "config.toml.backup"] as const;
 const RUNTIME_CATEGORIES = ["skills", "plugins", "logs", "sessions"] as const;
+const NON_ENUMERATED_EXTENSION_CATEGORIES = new Set(["skills", "plugins"]);
 const FAMILY_PATTERNS = {
   logs: /^logs_[A-Za-z0-9_-]+\.sqlite$/,
   state: /^state_[A-Za-z0-9_-]+\.sqlite$/,
@@ -34,8 +35,6 @@ interface SafeEntry {
 export interface DiagnosticOperationsOptions {
   /** Internal test seam. Never exposed by connector configuration or MCP inputs. */
   rootForTest?: string;
-  /** Internal synthetic-race seam. Never invoked by production callers. */
-  beforeExtensionEnumerationForTest?: (category: "skills" | "plugins") => Promise<void> | void;
   /** Internal synthetic-race seam. Never invoked by production callers. */
   beforeFixedFileReadForTest?: (kind: "configuration" | "database") => Promise<void> | void;
 }
@@ -152,7 +151,15 @@ async function safeRoot(root: string): Promise<{ root: string; entries: SafeEntr
     for (const item of listed) {
       const itemPath = path.join(root, item.name);
       const stat = await fs.lstat(itemPath);
-      if (isWindowsReparseOrLink(stat)) return undefined;
+      // These category roots are intentionally never opened or enumerated. Keep
+      // their direct-entry status available without following a junction/link.
+      if (isWindowsReparseOrLink(stat)) {
+        if (NON_ENUMERATED_EXTENSION_CATEGORIES.has(item.name)) {
+          entries.push({ name: item.name, path: itemPath, stat });
+          continue;
+        }
+        return undefined;
+      }
       const canonical = await fs.realpath(itemPath);
       if (path.dirname(canonical) !== canonicalRoot) return undefined;
       entries.push({ name: item.name, path: itemPath, stat });
@@ -208,40 +215,6 @@ function categorySummary(entries: SafeEntry[]): Record<string, unknown> {
   categories.databases = { status: "present", count: databaseEntries(entries).length, bytes: databaseEntries(entries).reduce((sum, entry) => sum + entry.stat.size, 0) };
   categories.configuration = { status: "present", count: CONFIG_FILES.filter((name) => direct(entries, name)?.stat.isFile()).length, bytes: 0 };
   return categories;
-}
-
-async function installedExtensions(
-  root: string,
-  entries: SafeEntry[],
-  beforeEnumerationForTest?: (category: "skills" | "plugins") => Promise<void> | void
-): Promise<{ status: "ok" | "unavailable"; items: Record<string, unknown>[]; truncated: boolean }> {
-  const values: Record<string, unknown>[] = [];
-  let truncated = false;
-  for (const source of ["skills", "plugins"] as const) {
-    const category = fixedChild(root, entries, source);
-    if (!category?.stat.isDirectory()) continue;
-    try {
-      await beforeEnumerationForTest?.(source);
-      await withBoundDirectory(category, async (children, categoryHandle) => {
-        if (children.length > MAX_RECORDS - values.length) truncated = true;
-        for (const child of children.slice(0, MAX_RECORDS - values.length)) {
-          await assertBound(category, categoryHandle);
-          const childPath = path.join(category.path, child.name);
-          if (path.dirname(path.resolve(childPath)) !== path.resolve(category.path)) throw new Error("child escaped parent");
-          const stat = await fs.lstat(childPath);
-          if (!child.isDirectory() || isWindowsReparseOrLink(stat)) throw new Error("unexpected child");
-          const childEntry = { name: child.name, path: childPath, stat };
-          const versionEntries = await withBoundDirectory(childEntry, async (entries) => entries);
-          await assertBound(category, categoryHandle);
-          const versions = versionEntries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
-          values.push({ name: child.name, source, version: versions.length === 1 ? versions[0] : "unknown", location: `${source}/${child.name}`, duplicate_version: versions.length > 1 });
-        }
-      });
-    } catch {
-      return { status: "unavailable", items: [], truncated: false };
-    }
-  }
-  return { status: "ok", items: values, truncated };
 }
 
 const ALLOWED_CONFIG: Record<string, Record<string, { type: "boolean" | "integer" | "enum"; values?: readonly string[] }>> = {
@@ -317,34 +290,37 @@ async function selectedDatabase(root: string, entries: SafeEntry[], familyKind: 
 
 export class CodexDiagnosticOperations {
   private readonly root: string;
-  private readonly beforeExtensionEnumerationForTest?: DiagnosticOperationsOptions["beforeExtensionEnumerationForTest"];
   private readonly beforeFixedFileReadForTest?: DiagnosticOperationsOptions["beforeFixedFileReadForTest"];
 
   constructor(options: DiagnosticOperationsOptions = {}) {
     this.root = options.rootForTest ?? path.join(os.homedir(), ".codex");
-    this.beforeExtensionEnumerationForTest = options.beforeExtensionEnumerationForTest;
     this.beforeFixedFileReadForTest = options.beforeFixedFileReadForTest;
   }
 
   async inventory(): Promise<Record<string, unknown>> {
-    return withTimeout(this.inventoryInner()).catch(() => safeFailure());
+    return withTimeout(this.inventoryInner()).catch(() => result("unavailable", { installed_extensions: { status: "unavailable" } }));
   }
 
   private async inventoryInner(): Promise<Record<string, unknown>> {
     const root = await safeRoot(this.root);
-    if (!root) return safeFailure();
-    if (!root.entries.length) return result("missing", { categories: categorySummary([]), process_locks: { status: "unavailable" } });
-    const extensions = await installedExtensions(root.root, root.entries, this.beforeExtensionEnumerationForTest);
-    const databases = databaseMetadata(root.entries);
-    if (extensions.status === "unavailable") {
-      return result("unavailable", {
-        categories: categorySummary(root.entries),
-        databases: databases.items,
+    if (!root) return result("unavailable", { installed_extensions: { status: "unavailable" } });
+    if (!root.entries.length) {
+      return result("missing", {
+        categories: categorySummary([]),
         installed_extensions: { status: "unavailable" },
         process_locks: { status: "unavailable" }
       });
     }
-    return result("ok", { categories: categorySummary(root.entries), databases: databases.items, installed_extensions: extensions.items, truncated: databases.truncated || extensions.truncated, process_locks: { status: "unavailable" } });
+    const databases = databaseMetadata(root.entries);
+    return result("ok", {
+      categories: categorySummary(root.entries),
+      databases: databases.items,
+      // Extension trees are intentionally not traversed on Node >=20 Windows.
+      // This field is stable and must never carry derived extension metadata.
+      installed_extensions: { status: "unavailable" },
+      truncated: databases.truncated,
+      process_locks: { status: "unavailable" }
+    });
   }
 
   async configurationSummary(): Promise<Record<string, unknown>> {

@@ -25,6 +25,12 @@ try {
     Object.keys(readServer._registeredTools).filter((name) => name.startsWith('codex_diagnostic_')).sort(),
     ['codex_diagnostic_config_summary', 'codex_diagnostic_inventory', 'codex_diagnostic_sqlite_metadata']
   );
+  assert.deepEqual(Object.keys(readServer._registeredTools.codex_diagnostic_inventory.inputSchema.shape), []);
+  assert.deepEqual(Object.keys(readServer._registeredTools.codex_diagnostic_config_summary.inputSchema.shape), []);
+  assert.deepEqual(
+    Object.keys(readServer._registeredTools.codex_diagnostic_sqlite_metadata.inputSchema.shape).sort(),
+    ['family_kind', 'operation']
+  );
 
   await fs.writeFile(path.join(root, 'config.toml'), '[general]\ntelemetry = true\nsecret = "token-should-not-leak"\nendpoint = "https://private.example"\n');
   await fs.mkdir(path.join(root, 'skills', 'synthetic-skill', '1.0.0'), { recursive: true });
@@ -48,7 +54,11 @@ try {
   assert.equal(inventoryText.includes('transcript-private.jsonl'), false);
   assert.equal(inventoryText.includes(root), false);
   assert.equal(inventoryText.includes('logs_synthetic.sqlite'), true);
-  assert.equal(inventoryText.includes('duplicate_version'), true);
+  assert.deepEqual(inventory.installed_extensions, { status: 'unavailable' });
+  assert.equal(inventoryText.includes('synthetic-skill'), false);
+  assert.equal(inventoryText.includes('synthetic-plugin'), false);
+  assert.equal(inventoryText.includes('duplicate_version'), false);
+  assert.equal(inventoryText.includes('1.0.0'), false);
   assert.equal(inventory.process_locks.status, 'unavailable');
 
   const configuration = await diagnostics.configurationSummary();
@@ -72,25 +82,6 @@ try {
 
   const external = path.join(temp, 'external');
   await fs.mkdir(path.join(external, 'outside-skill', 'outside-version'), { recursive: true });
-  const skillsPath = path.join(root, 'skills');
-  const skillsBackup = path.join(root, 'skills-before-race');
-  let extensionSwapComplete = false;
-  const racedExtensions = new CodexDiagnosticOperations({
-    rootForTest: root,
-    beforeExtensionEnumerationForTest: async (category) => {
-      if (category !== 'skills' || extensionSwapComplete) return;
-      extensionSwapComplete = true;
-      await fs.rename(skillsPath, skillsBackup);
-      await fs.symlink(external, skillsPath, process.platform === 'win32' ? 'junction' : 'dir');
-    }
-  });
-  const extensionRace = await racedExtensions.inventory();
-  const extensionRaceText = JSON.stringify(extensionRace);
-  assert.equal(extensionRace.status, 'unavailable');
-  assert.equal(extensionRaceText.includes('outside-skill'), false);
-  assert.equal(extensionRaceText.includes('outside-version'), false);
-  await fs.rm(skillsPath, { recursive: true, force: true });
-  await fs.rename(skillsBackup, skillsPath);
 
   const configPath = path.join(root, 'config.toml');
   const configBackup = path.join(root, 'config-before-race.toml');
@@ -139,7 +130,12 @@ try {
   await fs.rm(path.join(root, 'skills'), { recursive: true });
   try {
     await fs.symlink(external, path.join(root, 'skills'), process.platform === 'win32' ? 'junction' : 'dir');
-    assert.equal((await diagnostics.inventory()).status, 'unavailable');
+    const extensionLinkInventory = await diagnostics.inventory();
+    const extensionLinkText = JSON.stringify(extensionLinkInventory);
+    assert.equal(extensionLinkInventory.status, 'ok');
+    assert.deepEqual(extensionLinkInventory.installed_extensions, { status: 'unavailable' });
+    assert.equal(extensionLinkText.includes('outside-skill'), false);
+    assert.equal(extensionLinkText.includes('outside-version'), false);
   } catch (error) {
     if (error?.code !== 'EPERM') throw error;
   }

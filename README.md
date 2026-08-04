@@ -1098,8 +1098,9 @@ codexpro start --codex-diagnostic-read read
 
 The profile does not add the user home or Codex runtime directory to workspace
 roots, generic read/search/tree/bash/SQLite/write, or handoff access. It only
-registers fixed-input tools for a shallow inventory, typed configuration
-presence summary, and fixed SQLite metadata operations. The tools reject links,
+registers fixed-input tools for top-level runtime-category status, typed
+configuration presence summary, and fixed SQLite metadata operations. Installed
+skill and plugin extension trees are deliberately not enumerated. The tools reject links,
 path escapes, unexpected types, ambiguous database families, and unsafe races;
 their responses are bounded and omit configuration strings, paths, transcript
 names, logs, row values, SQL, and identifiers.

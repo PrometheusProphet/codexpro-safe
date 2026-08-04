@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Disabled nested skill and plugin extension enumeration in the Codex diagnostic
+  inventory on Node >=20 Windows. The `installed_extensions` result is now
+  deliberately and stably unavailable rather than exposing extension metadata.
 - Added the opt-in `off`/`read` Codex diagnostic runtime profile. Its
   fixed-input tools provide bounded metadata-only inventory, typed
   configuration summary, and SQLite metadata through an in-memory read copy;
