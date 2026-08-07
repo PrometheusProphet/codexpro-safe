@@ -106,9 +106,11 @@ lifecycle work:
   passed.
 
 Creating, deleting, or rotating provider credentials, tunnels, plugins, or
-organization settings requires explicit user authorization. Installing or
-changing Docker, Podman, WSL, Hyper-V, services, startup tasks, or machine-wide
-packages also requires explicit authorization.
+organization settings requires exact authority from the current request or an
+approved tracked program that expressly declares the target and consequence.
+Installing or changing Docker, Podman, WSL, Hyper-V, services, startup tasks, or
+machine-wide packages has the same requirement. Undeclared sensitive actions stay
+gated; declared actions do not require renewed approval at technical boundaries.
 
 ## Repository changes and verification
 
@@ -117,8 +119,9 @@ files.
 
 Unless the user asks for review-only or explicitly says not to publish, a
 completed repository change includes focused verification, staging only
-task-owned files, committing, and pushing the current branch when safe. Do not
-leave completed work uncommitted merely because the user did not separately ask
+task-owned files, committing on `main`, and pushing `main` when safe under the
+universal `direct-main` delivery mode. Do not leave completed work uncommitted
+merely because the user did not separately ask
 for a commit or push. Stop before commit or push only when verification fails,
 task-owned and unrelated changes cannot be separated safely, authentication or
 branch protection blocks publication, the work is incomplete, or the user asks
