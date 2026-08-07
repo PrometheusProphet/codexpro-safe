@@ -2,6 +2,11 @@
 
 CodexPro exposes a local workspace to an MCP client. Treat it like a developer tool with access to your source tree, not like a hosted SaaS app.
 
+This document is the normative owner for CodexPro-Safe's threat model, default
+posture, write/bash/tunnel boundaries, sensitive-path behavior, local handoff
+execution safety, and profile-loading implications. The README and FAQ provide
+short onboarding summaries only.
+
 ## Supported Version
 
 Security fixes target the latest published version only until the project reaches `1.0.0`.

@@ -33,6 +33,8 @@
 
 CodexPro Safe 把 ChatGPT Developer Mode 变成本地仓库的 MCP 连接器。默认的本地 handoff 姿态让 ChatGPT 读取文件、搜索代码、查看 git 状态，并写入受限的计划/上下文文件；通用源码写入、编辑和 bash 必须显式启用。
 
+本 README 负责产品介绍、安装和正常首次启动。[SECURITY.md](SECURITY.md) 负责详细的规范安全说明，[DOMAIN_SETUP.md](DOMAIN_SETUP.md) 负责公网 tunnel、稳定域名及相关 profile 的完整操作流程，[FAQ_ZH.md](FAQ_ZH.md) 只保留简短问答并指向这些详细所有者。
+
 本仓库发布的产品和 npm 包是 **CodexPro-Safe**（`codexpro-safe`）。安装 Safe 包后，`codexpro-safe` 是规范命令，`codexpro` 仍是受支持的 CLI 别名；不要把别名当作需要另行安装的上游 npm 包。
 
 CodexPro 不是速率限制绕过工具。它不会绕过、提升、合并、转售或修改 ChatGPT、Codex、OpenAI 或第三方模型的限制。它只是通过官方 Developer Mode / MCP App 路径，把你自己的 ChatGPT 会话连接到你自己的本地仓库。
@@ -244,61 +246,15 @@ ngrok free dev domain     推荐给大多数用户。免费账号给一个稳定
 Cloudflare named tunnel   适合已有自定义域名的用户。
 ```
 
-### Cloudflare quick tunnel
+普通 `codexpro-safe start` 默认只启动本地连接，不会打开公网 tunnel。
+Cloudflare quick tunnel 必须显式使用 `--tunnel cloudflare`，而且每次重启
+URL 都会改变。ngrok dev domain 和 Cloudflare named tunnel 可提供稳定
+hostname。
 
-最适合录 demo 或临时试用：
-
-```bash
-codexpro start
-```
-
-缺点很明确：quick tunnel 的 URL 每次重启都会变。如果你把 quick URL 放进 ChatGPT App，下一次启动时需要重新编辑 ChatGPT App 的 Server URL。
-
-### ngrok free dev domain
-
-推荐给大多数用户。创建一个免费 ngrok 账号，在 ngrok Dashboard 的 Universal Gateway -> Domains 找到你的 dev domain，比如：
-
-```text
-your-name.ngrok-free.dev
-```
-
-一次性认证 ngrok：
-
-```bash
-ngrok config add-authtoken YOUR_NGROK_TOKEN
-```
-
-保存到 CodexPro：
-
-```bash
-codexpro settings set --tunnel ngrok --hostname your-name.ngrok-free.dev
-```
-
-以后启动：
-
-```bash
-codexpro start
-```
-
-ChatGPT 里的 Server URL 可以保持不变。
-
-### Cloudflare named tunnel
-
-如果你有自己的域名，可以用 Cloudflare named tunnel：
-
-```bash
-cloudflared tunnel login
-cloudflared tunnel create codexpro
-cloudflared tunnel route dns codexpro codexpro.example.com
-```
-
-之后日常启动：
-
-```bash
-codexpro stable --hostname codexpro.example.com --tunnel-name codexpro
-```
-
-更多域名细节见 [DOMAIN_SETUP.md](DOMAIN_SETUP.md)。
+完整的 provider 配置、稳定 hostname、token 区分、多仓库端口/域名安排，
+以及显式的 `--save-config` / `--profile` 流程统一由
+[DOMAIN_SETUP.md](DOMAIN_SETUP.md) 负责。公网暴露、认证、write 和 bash 的
+规范安全边界统一见 [SECURITY.md](SECURITY.md)。
 
 ## Codex 风格上下文
 

@@ -7,6 +7,11 @@ CodexPro-Safe is a local developer bridge. Treat public launch readiness as two 
 
 Do not present CodexPro as a fully reviewed public ChatGPT app until it has gone through the current app review flow.
 
+Use [README.md](README.md) for onboarding truth, [SECURITY.md](SECURITY.md) for
+normative safety gates, and [DOMAIN_SETUP.md](DOMAIN_SETUP.md) for detailed
+public-tunnel, stable-domain, and profile procedures. This checklist verifies
+those owners; it does not replace them.
+
 ## Release Gate
 
 Run these before tagging a release:
@@ -69,6 +74,7 @@ Use CodexPro-Safe in default mode. Confirm that bash is unavailable, then explai
 
 ## Security Gate
 
+- Reverify the release against [SECURITY.md](SECURITY.md).
 - Keep auth enabled for public tunnels.
 - Keep bash off by default; enable `--bash safe` or `--bash full` only for a trusted local repository.
 - Keep generic source writes unavailable by default; use workspace writes only in explicit agent mode.

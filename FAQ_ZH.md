@@ -1,5 +1,9 @@
 # CodexPro 中文 FAQ
 
+本文只提供简短问答。详细安装与首次启动见 [README_ZH.md](README_ZH.md)，
+规范安全说明见 [SECURITY.md](SECURITY.md)，tunnel、稳定域名与 profile 的
+完整操作流程见 [DOMAIN_SETUP.md](DOMAIN_SETUP.md)。
+
 ## 我应该用什么 ChatGPT 账号？
 
 使用 ChatGPT Plus 或 Pro，并确保账号能访问 Apps / Developer Mode。
@@ -148,23 +152,10 @@ Cloudflare quick tunnel 每次重启 URL 都变。把 quick URL 填到 ChatGPT �
 
 ## 能每天使用同一个 ChatGPT App URL 吗？
 
-可以，前提是使用稳定 hostname。
-
-推荐简单路径：
-
-```bash
-codexpro-safe setup --save-config
-# 选择 ngrok
-# 输入你的 ngrok free dev domain
-```
-
-之后：
-
-```bash
-codexpro-safe start --profile
-```
-
-只有在保存并审查该工作区 profile 后，再用 `--profile` 启动，才会复用同一个 hostname 和 CodexPro token。
+可以，前提是预留稳定的 ngrok 或 Cloudflare hostname。保存仍必须显式使用
+`codexpro-safe setup --save-config`，复用仍必须显式使用
+`codexpro-safe start --profile`。完整步骤统一见
+[稳定域名与 profile 指南](DOMAIN_SETUP.md)；本 FAQ 不维护第二套操作流程。
 
 ## quick mode 为什么每次都要改 URL？
 

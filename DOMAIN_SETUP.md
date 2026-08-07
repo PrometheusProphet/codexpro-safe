@@ -2,6 +2,10 @@
 
 This guide explains how to use a Namecheap domain, Cloudflare, or ngrok so CodexPro can keep a stable ChatGPT connector URL.
 
+This document owns the detailed public-tunnel, stable-hostname, multi-workspace,
+and related saved-profile procedures. [SECURITY.md](SECURITY.md) remains the
+normative owner for exposure, authentication, credential, write, and bash safety.
+
 There are two different products hiding behind the phrase "one URL":
 
 - Personal stable URL: one developer runs CodexPro locally and keeps a stable URL such as `https://mcp.example.space/mcp`.
@@ -107,7 +111,9 @@ codexpro stable \
   --hostname local.example.space \
   --tunnel-name codexpro-local \
   --token replace-with-a-long-stable-token \
-  --bash safe
+  --mode handoff \
+  --write handoff \
+  --bash off
 ```
 
 Add this once in ChatGPT Developer Mode:
@@ -143,7 +149,9 @@ codexpro stable \
   --hostname local.example.space \
   --cloudflare-token-file ~/.codexpro/cloudflare-tunnel-token \
   --token replace-with-a-long-stable-token \
-  --bash safe
+  --mode handoff \
+  --write handoff \
+  --bash off
 ```
 
 Do not confuse these two tokens:
@@ -177,7 +185,9 @@ codexpro ngrok \
   --root /absolute/path/to/your/repo \
   --hostname your-domain.ngrok-free.dev \
   --token replace-with-a-long-stable-token \
-  --bash safe
+  --mode handoff \
+  --write handoff \
+  --bash off
 ```
 
 Add this once in ChatGPT Developer Mode:
@@ -193,6 +203,43 @@ Token: paste your long workspace token
 CodexPro starts the local MCP server, runs `ngrok http http://127.0.0.1:8787 --url https://your-domain.ngrok-free.dev`, waits for `/healthz`, copies the Server URL, and keeps both processes alive until you quit.
 
 Temporary compatibility only: if your client cannot send a Bearer token, launch once with `--allow-query-token` or `CODEXPRO_ALLOW_QUERY_TOKEN=1` and use a URL containing `?codexpro_token=...`. Do not save or share that URL; query-token URLs are weaker because tokens can appear in URLs, logs, browser history, screenshots, and copied text.
+
+## Saved Workspace Profiles
+
+Profile saving and reuse are both explicit. Ordinary `setup` and `start` do not
+silently save or load a workspace profile.
+
+To save reviewed setup choices for the current workspace:
+
+```bash
+codexpro-safe setup --save-config
+```
+
+CodexPro stores the chosen tunnel provider, hostname, local port, mode, and
+generated CodexPro auth token under `~/.codexpro/profiles/`. To reuse that
+profile for a later launch:
+
+```bash
+codexpro-safe start --profile
+```
+
+Review, change, copy, or delete saved settings explicitly:
+
+```bash
+codexpro settings show
+codexpro settings list
+codexpro settings set --tunnel ngrok --hostname your-domain.ngrok-free.dev
+codexpro settings use --from-root /path/to/another/repo
+codexpro settings delete --yes
+```
+
+Displayed tokens are redacted. Use `setup --profile` only when you intentionally
+want saved values as setup defaults, and use `setup --save-config` again when you
+want to replace the saved port, mode, tunnel, hostname, or CodexPro auth token.
+
+Each simultaneously running repository needs its own local port. Stable public
+tunnels also need distinct hostnames; do not point two active workspaces at one
+port or public hostname.
 
 ## Product Plan For All Users
 

@@ -35,6 +35,8 @@
 
 CodexPro Safe is a safety-first fork of CodexPro. It keeps the upstream MIT license and attribution, but changes the default posture to local-only handoff planning: bash off, source writes limited to `.ai-bridge`, no public tunnel, no query-token URL, no symlink traversal, and no saved-profile reuse unless explicitly requested.
 
+This README owns product onboarding and the normal first-run path. [SECURITY.md](SECURITY.md) owns detailed normative safety guidance, [DOMAIN_SETUP.md](DOMAIN_SETUP.md) owns public-tunnel, stable-domain, and related profile procedures, and [FAQ.md](FAQ.md) provides concise answers that point back to those owners.
+
 CodexPro is not a rate-limit bypass. It uses ChatGPT's official Developer Mode and MCP app path to connect your own ChatGPT session to your own local repo. ChatGPT and Codex remain separate product surfaces, each subject to its own plan limits, safety rules, and availability.
 
 If one workflow is unavailable and another product surface you already have access to is still available, CodexPro lets you keep working against the same local repo without modifying or evading either product's limits.
@@ -158,10 +160,21 @@ Full mode adds:
 - `codex_context` — load Codex-style context in one call: AGENTS instructions for a target path, `.ai-bridge` files, and optional git status/diff.
 - `handoff_to_codex` — compatibility wrapper for `handoff_to_agent` with `agent=codex`.
 
-Local-only companion command:
+## Local handoff execution
+
+ChatGPT can create `.ai-bridge/current-plan.md` through `handoff_to_agent`, but
+remote MCP tools do not execute local agents. Execution remains a deliberate
+local CLI action:
 
 - `codexpro execute-handoff` — run a previously written `.ai-bridge/current-plan.md` through a local agent, then collect status, logs, and git diff. This is intentionally a CLI command, not a remote MCP tool.
 - `codexpro watch-handoff` — watch `.ai-bridge/current-plan.md` locally and run a new plan through a configured agent when its content hash changes. This is also CLI-only and is not exposed as a remote MCP tool.
+
+Preview an unfamiliar execution first:
+
+```bash
+codexpro execute-handoff --agent opencode --model provider/model --dry-run
+codexpro execute-handoff --agent opencode --model provider/model
+```
 
 The watcher is the safer way to automate handoff execution from ChatGPT Web. ChatGPT writes the plan through `handoff_to_agent`; the user-started local watcher notices the new plan and runs Pi, OpenCode, Codex, or a restricted custom command from the terminal:
 
@@ -422,29 +435,9 @@ press o in the CodexPro terminal control panel
 
 The page shows the active workspace, local MCP endpoint, safety modes, allowed roots, and the exact ChatGPT setup steps. It is served by the local CodexPro process and stays token-protected when auth is enabled.
 
-Saved workspace profile behavior:
-
-```text
-codexpro setup --save-config
-  choose quick, stable, ngrok, or local
-  enter the Cloudflare/ngrok hostname when needed
-  accept the generated CodexPro auth token
-  save the profile
-
-future codexpro start --profile
-  loads the saved profile for the current folder
-  reuses the saved tunnel provider, hostname, port, mode, and token
-```
-
-If you opt into a saved ngrok or Cloudflare stable profile, CodexPro prints the saved hostname and reminds you to use:
-
-```bash
-codexpro start --profile
-```
-
-Use `codexpro setup --save-config` again only when you want to change the port, mode, tunnel provider, hostname, or CodexPro auth token.
-
-Useful profile flags:
+Saved profiles are never written or loaded silently. The complete stable-URL
+profile procedure lives in [DOMAIN_SETUP.md](DOMAIN_SETUP.md#saved-workspace-profiles).
+The normal controls are:
 
 ```bash
 codexpro start --profile         # load saved profile for this run
@@ -464,7 +457,8 @@ codexpro settings set --tunnel cloudflare
 codexpro settings delete --yes
 ```
 
-Use `codexpro settings` when you want to create a saved ngrok or Cloudflare preference, explicitly reuse a saved setup from another repo, or delete the saved workspace preference. The saved token is redacted when settings are shown.
+Use `codexpro settings` to inspect, change, reuse, or delete an explicitly saved
+workspace profile. Displayed tokens are redacted.
 
 Terminal controls:
 
@@ -528,60 +522,12 @@ codexpro start \
   --tunnel none
 ```
 
-In handoff mode, ChatGPT can create a plan for a local implementation agent without getting direct source-write access. Use `handoff_to_agent` from ChatGPT with `agent=opencode`, `agent=pi`, `agent=codex`, or a custom agent id. CodexPro writes:
-
-```text
-.ai-bridge/current-plan.md
-.ai-bridge/agent-status.md
-.ai-bridge/implementation-diff.patch
-.ai-bridge/execution-log.jsonl
-```
-
-Then run the implementation locally with `codexpro execute-handoff`:
-
-```bash
-codexpro execute-handoff --agent opencode --model provider/cheap-model
-```
-
-Dry-run first if you want to inspect the exact command:
-
-```bash
-codexpro execute-handoff --agent opencode --model provider/cheap-model --dry-run
-```
-
-Pi adapter:
-
-```bash
-codexpro execute-handoff --agent pi --model provider/cheap-model
-```
-
-Custom adapter:
-
-```bash
-codexpro execute-handoff \
-  --agent custom \
-  --command "my-agent --model {{model}} --task-file {{plan_file}}" \
-  --model provider/cheap-model
-```
-
-Template placeholders:
-
-```text
-{{model}}      model passed with --model
-{{plan_file}}  absolute path to .ai-bridge/current-plan.md
-{{plan_text}}  full plan text as one argument
-{{root}}       workspace root
-```
-
-By default, `execute-handoff` asks for local confirmation before running. Use `--yes` only in trusted scripts. After execution, CodexPro writes:
-
-```text
-.ai-bridge/agent-status.md
-.ai-bridge/implementation-diff.patch
-.ai-bridge/execution-log.jsonl
-```
-
-Then let ChatGPT review those files through `read_handoff` or `codex_context`.
+In handoff mode, ChatGPT can call `handoff_to_agent` to create a plan without
+receiving direct source-write or local-agent execution capability. Run or watch
+that plan from the local terminal, then review the resulting status, log, and
+diff through `read_handoff` or `codex_context`. See
+[Local handoff execution](#local-handoff-execution) for the one detailed
+workflow and safety boundary.
 
 Manual fallback:
 
@@ -754,203 +700,40 @@ That writes:
 
 Then run Codex, OpenCode, Pi, or another local implementation agent against `.ai-bridge/current-plan.md`.
 
-## Cloudflare options
+## Public tunnels and stable domains
 
-The launcher uses Cloudflare quick tunnels only when you pass:
-
-```bash
---tunnel cloudflare
-```
-
-Quick tunnels are good for demos, but the `trycloudflare.com` URL changes whenever the tunnel restarts. Do not use quick tunnels if you want a URL users can keep in ChatGPT.
-
-CodexPro needs `cloudflared` for public HTTPS tunnels. The launcher first uses `cloudflared` from PATH, then `~/.codexpro/bin`. Downloading the official Cloudflare release is explicit through `codexpro install-cloudflared` or `--install-cloudflared`.
+Public exposure is always explicit. Cloudflare quick tunnels are useful for
+demos but produce a new URL after restart; ngrok dev domains and Cloudflare
+named tunnels provide stable hostnames. Public and non-loopback endpoints
+require CodexPro bearer-token authentication.
 
 ```bash
-codexpro start --tunnel cloudflare
+codexpro start --tunnel cloudflare       # temporary demo URL
+codexpro ngrok --hostname your-domain.ngrok-free.dev
+codexpro stable --hostname codexpro.example.com --tunnel-name codexpro
 ```
 
-To perform a fresh local install:
+The complete provider setup, stable-hostname commands, token distinction,
+multi-repository layout, and explicit saved-profile workflow are owned by
+[DOMAIN_SETUP.md](DOMAIN_SETUP.md). Cloudflare binary installation and the
+security implications of public exposure are owned by
+[SECURITY.md](SECURITY.md#cloudflare-binary-install).
 
-```bash
-codexpro install-cloudflared
-```
+### Stable URL summary
 
-You can also force a refresh during normal startup with `codexpro start --install-cloudflared`.
-
-To manage Cloudflare Tunnel yourself, pass a path:
-
-```bash
-codexpro start --tunnel cloudflare --cloudflared /path/to/cloudflared
-```
-
-Explicit local install currently supports:
-
-```text
-macOS:   arm64, x64
-Windows: x64, 32-bit
-Linux:   x64, 32-bit, arm64, arm
-```
-
-Other platforms can still work by installing `cloudflared` manually and passing `--cloudflared <path>`.
-
-### Stable URL mode
-
-For daily use, use ngrok's free dev domain, a Cloudflare named tunnel, or a Cloudflare dashboard-managed tunnel token. This gives you one stable ChatGPT connector URL, for example:
+For daily use, reserve a hostname with ngrok or Cloudflare and configure this
+Server URL in ChatGPT once:
 
 ```text
 https://codexpro.example.com/mcp
 ```
 
-There is one unavoidable boundary: a permanent public URL needs a tunnel provider such as Cloudflare or ngrok and a hostname reserved with that provider. CodexPro can run the tunnel after that setup, but a quick tunnel cannot be made permanent.
-
-If you use quick mode, you will need to edit the ChatGPT app every restart because the copied Server URL changes.
-
-One-time Cloudflare CLI setup with your own domain:
-
-```bash
-cloudflared tunnel login
-cloudflared tunnel create codexpro
-cloudflared tunnel route dns codexpro codexpro.example.com
-```
-
-Then daily startup is one command:
-
-```bash
-codexpro stable \
-  --root /absolute/path/to/your/repo \
-  --hostname codexpro.example.com \
-  --tunnel-name codexpro \
-  --token keep-this-codexpro-token-stable \
-  --mode handoff \
-  --write handoff \
-  --bash off
-```
-
-Put this stable Server URL into ChatGPT Developer Mode once:
-
-```text
-https://codexpro.example.com/mcp
-```
-
-Configure `Authorization: Bearer keep-this-codexpro-token-stable` when your MCP client supports headers. Use `--allow-query-token` only for backward-compatible clients that cannot send headers.
-
-After that, users only restart the local command. They do not need to edit the ChatGPT connector unless they change the hostname or token.
-
-If you create a remotely managed tunnel in the Cloudflare dashboard instead, save its tunnel token to a local file and run:
-
-```bash
-codexpro start \
-  --root /absolute/path/to/your/repo \
-  --tunnel cloudflare-named \
-  --hostname codexpro.example.com \
-  --cloudflare-token-file ~/.codexpro/cloudflare-tunnel-token \
-  --token keep-this-codexpro-token-stable \
-  --mode handoff \
-  --write handoff \
-  --bash off
-```
-
-Token naming matters:
-
-```text
---cloudflare-token-file  Cloudflare's tunnel connector token.
---token                  CodexPro's MCP bearer auth token.
-```
-
-### Stable URL with ngrok
-
-If you already installed ngrok and authenticated it:
-
-```bash
-ngrok config add-authtoken <your-ngrok-token>
-```
-
-Create a free ngrok account, find your assigned dev domain in the ngrok dashboard under Universal Gateway -> Domains, then start CodexPro with:
-
-```bash
-codexpro ngrok \
-  --root /absolute/path/to/your/repo \
-  --hostname your-domain.ngrok-free.dev \
-  --token keep-this-codexpro-token-stable
-```
-
-Equivalent explicit form:
-
-```bash
-codexpro start \
-  --root /absolute/path/to/your/repo \
-  --tunnel ngrok \
-  --hostname your-domain.ngrok-free.dev \
-  --token keep-this-codexpro-token-stable
-```
-
-CodexPro runs ngrok in the background with:
-
-```bash
-ngrok http http://127.0.0.1:8787 --url https://your-domain.ngrok-free.dev
-```
-
-Put this Server URL into ChatGPT Developer Mode once:
-
-```text
-https://your-domain.ngrok-free.dev/mcp
-```
-
-Configure `Authorization: Bearer keep-this-codexpro-token-stable` when your MCP client supports headers.
-
-After that, keep using the same hostname and token. You do not need to recreate the ChatGPT app unless you change either one.
-
-After saving this in `codexpro setup --save-config`, daily startup from that repo is:
-
-```bash
-codexpro start --profile
-```
-
-CodexPro will reuse the saved ngrok hostname and saved CodexPro token.
-
-### Running two repositories at the same time
-
-You can run CodexPro for multiple repositories at once, but each running workspace needs its own local port:
-
-```bash
-# repo A
-codexpro setup  # choose port 8787
-
-# repo B
-codexpro setup  # choose port 8788
-```
-
-If both repositories use quick tunnels, different local ports are enough because each run gets a different temporary public URL.
-
-If both repositories use stable ngrok or Cloudflare URLs, each repository also needs its own public hostname:
-
-```text
-repo A  port 8787  codexpro-a.ngrok-free.dev
-repo B  port 8788  codexpro-b.ngrok-free.dev
-```
-
-Do not point two running repositories at the same local port or the same ngrok/Cloudflare hostname. The second process will fail because the port or public hostname is already owned by the first process.
-
-For Namecheap and custom-domain setup, read [DOMAIN_SETUP.md](DOMAIN_SETUP.md). The key point is that a stable domain can solve your own repeated ChatGPT connector setup now, but a single shared URL for every future user needs a hosted relay or per-user tunnel routing.
-
-If ChatGPT does not let you edit an existing app's Server URL, do not use quick tunnels for daily work. Use `codexpro stable` with a Cloudflare named tunnel and put the stable URL into ChatGPT once:
-
-```bash
-codexpro stable-help
-```
-
-For a less manual daily workflow, create a shell alias:
-
-```bash
-alias codexpro-local='codexpro start --root /path/to/your/repo --bash safe'
-```
-
-Then run:
-
-```bash
-codexpro-local
-```
+A permanent public URL still requires a tunnel provider and a hostname reserved
+with that provider; a quick tunnel cannot be made permanent. Saving the provider,
+hostname, port, mode, and CodexPro token is opt-in with `setup --save-config`,
+and reuse remains explicit with `start --profile`. Use a distinct local port and
+public hostname for every simultaneously running workspace. See the domain guide
+for the exact commands and token-handling rules.
 
 ## Manual HTTP MCP mode
 
@@ -1170,20 +953,11 @@ CODEXPRO_INHERIT_ENV=1 CODEXPRO_BASH_MODE=full npm run start:http
 
 ## Safety boundaries
 
-Blocked by default:
-
-```text
-.env, .env.*
-.git internals
-node_modules
-private key patterns such as *.pem, *.key, id_rsa, id_ed25519
-credential files such as .npmrc, .pypirc, .netrc, .aws, .azure, .kube, Docker config, and service-account JSON
-local state/database files such as *.sqlite, *.sqlite3, and *.db
-build/cache outputs such as dist, build, .next, coverage, .cache
-paths outside the opened workspace root
-workspace roots outside CODEXPRO_ALLOWED_ROOTS
-symlink/junction traversal by default, even when it resolves inside the workspace
-```
+CodexPro blocks common secret, credential, Git-internal, dependency, database,
+build/cache, out-of-root, and symlink/junction paths by default. These controls
+are enforced server-side but do not make CodexPro an OS sandbox. The complete
+threat model, blocked-path categories, public-tunnel rules, profile implications,
+and trusted agent/bash guidance are owned by [SECURITY.md](SECURITY.md).
 
 Extra blocked globs can be added with a comma-separated env var:
 

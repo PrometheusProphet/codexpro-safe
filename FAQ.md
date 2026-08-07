@@ -1,5 +1,10 @@
 # CodexPro FAQ
 
+This document answers common questions concisely. Detailed onboarding belongs
+to [README.md](README.md), normative safety guidance to
+[SECURITY.md](SECURITY.md), and tunnel/domain/profile procedures to
+[DOMAIN_SETUP.md](DOMAIN_SETUP.md).
+
 ## Which ChatGPT account should I use?
 
 Use ChatGPT Plus or Pro with Apps / Developer Mode access.
@@ -155,23 +160,11 @@ Official references:
 
 ## Can I use the same ChatGPT app URL every day?
 
-Yes, if you use a stable hostname.
-
-Recommended simple path:
-
-```bash
-codexpro-safe setup --save-config
-# choose ngrok
-# enter your ngrok free dev domain
-```
-
-After that:
-
-```bash
-codexpro-safe start --profile
-```
-
-The same hostname and CodexPro token are reused only when you explicitly launch with `--profile` after saving and reviewing that workspace profile.
+Yes, if you reserve a stable ngrok or Cloudflare hostname. Saving its workspace
+settings remains opt-in with `codexpro-safe setup --save-config`, and reuse is
+explicit with `codexpro-safe start --profile`. Follow the complete
+[stable-domain and profile procedure](DOMAIN_SETUP.md); this FAQ does not define
+a separate setup path.
 
 ## What if I run CodexPro in two repos at once?
 
@@ -224,3 +217,6 @@ Saved tokens are redacted when profiles are displayed.
 
 Profiles are opt-in: `--save-config` offers to save setup choices, and
 `--profile` explicitly loads them for setup or start.
+
+See [DOMAIN_SETUP.md](DOMAIN_SETUP.md#saved-workspace-profiles) for the detailed
+stable-URL profile workflow.
