@@ -13,22 +13,24 @@ CodexPro 不解锁 Developer Mode，不解锁模型，不绕过账号限制，�
 全局安装一次：
 
 ```bash
-npm install -g codexpro
+npm install -g codexpro-safe
 ```
 
 然后进入目标仓库运行：
 
 ```bash
-codexpro setup
+codexpro-safe setup --save-config
 ```
 
 以后每天从同一个仓库启动：
 
 ```bash
-codexpro start
+codexpro-safe start --profile
 ```
 
-`npx codexpro@latest start` 仍然可用，但普通用户更容易理解全局安装。
+本仓库发布的产品和 npm 包是 **CodexPro-Safe**（`codexpro-safe`）。安装后，`codexpro-safe` 是规范命令，`codexpro` 仍是受支持的 CLI 别名，不是需要另行安装的上游 npm 包。`npx codexpro-safe@latest start` 可作免安装回退。
+
+`--save-config` 才会让你选择是否保存工作区配置；保存后也必须在启动时显式传入 `--profile` 才会复用。普通 `setup` 或 `start` 不会静默保存或加载 profile。
 
 ## Windows 可以不用终端窗口来启动、重启和停止吗？
 
@@ -59,10 +61,10 @@ Name: CodexPro
 Description: Local workspace bridge for ChatGPT coding
 Connection: Server URL
 Server URL: 粘贴 CodexPro 复制的 URL
-Authentication: No Authentication / None
+Authentication: Bearer token
 ```
 
-复制的 Server URL 已经包含私有 CodexPro token。
+粘贴 CodexPro Safe 显示的私有 token。默认使用 `Authorization: Bearer <token>`；URL query token 只供显式兼容使用，不要保存或分享它。
 
 ## CSP 要保持开启吗？
 
@@ -113,7 +115,7 @@ ChatGPT 能看到工具显式暴露的工作区内容：
 
 ## ChatGPT 可以编辑什么？
 
-Normal coding 模式下，ChatGPT 可以在配置的工作区内写入和精确编辑文件。
+默认 handoff 模式下，ChatGPT 可以保存计划/提示文件并导出上下文；标准工具面不会提供通用源码 `write`/`edit`，bash 也保持关闭。只有在受信任仓库中显式启用 agent 模式和 workspace write 后，ChatGPT 才能在配置的工作区内写入和精确编辑文件。
 
 默认会阻止：
 
@@ -125,7 +127,7 @@ Normal coding 模式下，ChatGPT 可以在配置的工作区内写入和精确�
 - symlink 逃逸
 - 工作区外路径
 
-如果你只想让 ChatGPT 规划，不想让它直接改源码，用 handoff 模式。
+默认 handoff 模式适合让 ChatGPT 规划，再由本地执行器实施。
 
 ## 选择哪种 tunnel？
 
@@ -140,7 +142,7 @@ Normal coding 模式下，ChatGPT 可以在配置的工作区内写入和精确�
 
 Cloudflare quick tunnel 每次重启 URL 都变。把 quick URL 填到 ChatGPT 后，每次重启都要改 ChatGPT App 的 Server URL。
 
-大多数用户建议用 ngrok free dev domain。创建免费 ngrok 账号，在 Universal Gateway -> Domains 找到分配给你的 dev domain，并在 `codexpro setup` 里保存。
+大多数用户建议用 ngrok free dev domain。创建免费 ngrok 账号，在 Universal Gateway -> Domains 找到分配给你的 dev domain；只有想保存该工作区选择时才运行 `codexpro-safe setup --save-config`。
 
 如果你有自己的域名，用 Cloudflare named tunnel，把 DNS 路由到例如 `codexpro.example.com` 的主机名。
 
@@ -151,7 +153,7 @@ Cloudflare quick tunnel 每次重启 URL 都变。把 quick URL 填到 ChatGPT �
 推荐简单路径：
 
 ```bash
-codexpro setup
+codexpro-safe setup --save-config
 # 选择 ngrok
 # 输入你的 ngrok free dev domain
 ```
@@ -159,10 +161,10 @@ codexpro setup
 之后：
 
 ```bash
-codexpro start
+codexpro-safe start --profile
 ```
 
-同一个 hostname 和 CodexPro token 会被当前工作区复用。
+只有在保存并审查该工作区 profile 后，再用 `--profile` 启动，才会复用同一个 hostname 和 CodexPro token。
 
 ## quick mode 为什么每次都要改 URL？
 
@@ -181,7 +183,7 @@ repo A: port 8787, hostname A
 repo B: port 8788, hostname B
 ```
 
-分别在两个仓库里运行 `codexpro setup` 并保存 profile。
+分别在两个仓库里运行 `codexpro-safe setup --save-config`（仅在需要保存时），并用 `codexpro-safe start --profile` 显式复用 profile。
 
 ## 能不能用 codexpro.github.io？
 
@@ -213,7 +215,7 @@ CodexPro 使用 ChatGPT 的官方 Developer Mode / MCP App 接入路径，让你
 
 CodexPro 是本地开发桥，不是操作系统级沙箱。
 
-只在你信任的仓库里使用。公网 tunnel 保持 token auth 开启。保持 safe bash，除非你明确知道为什么需要 full bash。公网暴露前先读 [SECURITY.md](SECURITY.md)。
+只在你信任的仓库里使用。公网 tunnel 保持 token auth 开启。bash 默认关闭；只有明确理解风险时才启用 `--bash safe` 或 `--bash full`。公网暴露前先读 [SECURITY.md](SECURITY.md)。
 
 ## 保存的设置在哪里？
 
@@ -232,6 +234,8 @@ codexpro settings delete --yes
 ```
 
 显示设置时，保存的 token 会被打码。
+
+保存和复用都是显式操作：`--save-config` 保存 setup 选择，`--profile` 才在 setup 或 start 时加载它们。
 
 ## CodexPro 能帮助 ChatGPT 维持上下文吗？
 

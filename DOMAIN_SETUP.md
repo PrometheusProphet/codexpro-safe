@@ -155,7 +155,7 @@ CodexPro MCP token       protects the /mcp endpoint that ChatGPT calls.
 
 ## Ngrok Free Dev Domain
 
-Ngrok is the simpler personal stable URL for most users. A free ngrok account includes a dev domain, which can be saved once in CodexPro and reused every time the local server restarts.
+Ngrok is the simpler personal stable URL for most users. A free ngrok account includes a dev domain, which can be saved through the explicit profile flow and later reused only when the user launches with `--profile`.
 
 One-time setup:
 

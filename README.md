@@ -24,7 +24,7 @@
   ·
   <a href="https://github.com/rebel0789/codexpro">Star on GitHub</a>
   ·
-  <a href="https://www.npmjs.com/package/codexpro">npm</a>
+  <a href="https://www.npmjs.com/package/codexpro-safe">npm</a>
   ·
   <a href="DOMAIN_SETUP.md">Stable URL guide</a>
   ·

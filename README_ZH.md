@@ -2,14 +2,14 @@
   <img src="docs/favicon.svg" width="72" height="72" alt="CodexPro logo">
 </p>
 
-<h1 align="center">CodexPro</h1>
+<h1 align="center">CodexPro Safe</h1>
 
 <p align="center">
   让 ChatGPT Web 看见你的本地仓库，并像本地代码代理一样工作。
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/codexpro"><img alt="npm" src="https://img.shields.io/npm/v/codexpro?style=flat-square"></a>
+  <a href="https://www.npmjs.com/package/codexpro-safe"><img alt="npm" src="https://img.shields.io/npm/v/codexpro-safe?style=flat-square"></a>
   <a href="https://github.com/rebel0789/codexpro/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/rebel0789/codexpro/ci.yml?branch=main&style=flat-square"></a>
   <a href="https://github.com/rebel0789/codexpro/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/rebel0789/codexpro?style=flat-square"></a>
   <a href="https://rebel0789.github.io/codexpro/zh.html"><img alt="中文站点" src="https://img.shields.io/badge/site-%E4%B8%AD%E6%96%87%E6%96%87%E6%A1%A3-67e8f9?style=flat-square"></a>
@@ -22,7 +22,7 @@
   ·
   <a href="https://github.com/rebel0789/codexpro">GitHub 点星</a>
   ·
-  <a href="https://www.npmjs.com/package/codexpro">npm</a>
+  <a href="https://www.npmjs.com/package/codexpro-safe">npm</a>
   ·
   <a href="DOMAIN_SETUP.md">稳定 URL 指南</a>
   ·
@@ -31,15 +31,17 @@
   <a href="SECURITY.md">安全说明</a>
 </p>
 
-CodexPro 把 ChatGPT Developer Mode 变成本地仓库的 MCP 代码代理。你在目标仓库里运行 `codexpro setup`，把复制好的 Server URL 粘贴到 ChatGPT 的 Create app 页面，ChatGPT 就能读取文件、搜索代码、查看 git 状态、写入或精确编辑文件，并运行安全范围内的验证命令。
+CodexPro Safe 把 ChatGPT Developer Mode 变成本地仓库的 MCP 连接器。默认的本地 handoff 姿态让 ChatGPT 读取文件、搜索代码、查看 git 状态，并写入受限的计划/上下文文件；通用源码写入、编辑和 bash 必须显式启用。
+
+本仓库发布的产品和 npm 包是 **CodexPro-Safe**（`codexpro-safe`）。安装 Safe 包后，`codexpro-safe` 是规范命令，`codexpro` 仍是受支持的 CLI 别名；不要把别名当作需要另行安装的上游 npm 包。
 
 CodexPro 不是速率限制绕过工具。它不会绕过、提升、合并、转售或修改 ChatGPT、Codex、OpenAI 或第三方模型的限制。它只是通过官方 Developer Mode / MCP App 路径，把你自己的 ChatGPT 会话连接到你自己的本地仓库。
 
 如果 Codex 当前工作流暂时不可用，而你的 ChatGPT 页面仍然可用，CodexPro 可以让你继续在同一个本地仓库上工作。反过来也一样：ChatGPT 负责高上下文规划，Codex、OpenCode、Pi 或其他本地执行器负责终端里的实际执行。
 
 ```bash
-npm install -g codexpro
-codexpro setup
+npm install -g codexpro-safe
+codexpro-safe setup
 ```
 
 ## 适合谁
@@ -67,10 +69,12 @@ ChatGPT Web 可以看到：
 ChatGPT Web 可以操作：
   read    读取文件
   search  搜索代码
-  write   在工作区内写文件
-  edit    精确替换文本
-  bash    运行安全验证命令
   show_changes 查看当前改动摘要
+  handoff/export 写入受限的计划和上下文文件
+
+显式 agent 模式才可使用：
+  write/edit 在工作区内写入或精确编辑文件
+  bash       运行安全验证命令
 
 本地执行器仍然有价值：
   Codex / OpenCode / Pi 执行计划
@@ -86,34 +90,34 @@ ChatGPT 里每个 CodexPro 工具都可以显示紧凑 v9 卡片：server config
 
 ## 快速开始
 
-先全局安装一次：
+先全局安装 Safe 包：
 
 ```bash
-npm install -g codexpro
+npm install -g codexpro-safe
 ```
 
 进入你想让 ChatGPT 工作的仓库：
 
 ```bash
 cd /path/to/your/repo
-codexpro setup
+codexpro-safe setup --save-config
 ```
 
-`setup` 会引导你选择端口、模式和公网 URL 方式，并保存当前仓库的配置。它会启动本地 MCP HTTP 服务、生成私有 CodexPro token、启动隧道，并把完整 Server URL 复制到剪贴板。
+`setup` 默认使用本地、handoff、bash-off 的安全姿态。`--save-config` 才会让你选择是否保存当前工作区配置；不带它的普通 setup 不会静默保存配置。公网 tunnel 也必须显式选择。
 
-以后同一个仓库的日常启动只需要：
+如已明确保存并审查该工作区配置，日常启动时显式复用它：
 
 ```bash
-codexpro start
+codexpro-safe start --profile
 ```
 
 不想全局安装时，也可以用：
 
 ```bash
-npx codexpro@latest start --root /absolute/path/to/your/repo
+npx codexpro-safe@latest start --root /absolute/path/to/your/repo
 ```
 
-但普通用户更推荐全局安装，这样命令就是固定的 `codexpro setup` 和 `codexpro start`。
+但普通用户更推荐全局安装，这样命令就是固定的 `codexpro-safe setup` 和 `codexpro-safe start`。若要复用保存的配置，给启动命令加 `--profile`。
 
 Windows 用户也可以使用可选的
 [CodexPro-Safe Manager](docs/WINDOWS_MANAGER.md)，通过通知区域界面一键启动、
@@ -143,28 +147,38 @@ Name: CodexPro
 Description: Local workspace bridge for ChatGPT coding
 Connection: Server URL
 Server URL: 粘贴 CodexPro 自动复制的 URL
-Authentication: No Authentication / None
+Authentication: Bearer token
 ```
 
-复制的 Server URL 已经包含私有 `codexpro_token`。不要单独粘贴 token，除非你的 ChatGPT UI 明确支持自定义 header。
+粘贴 CodexPro Safe 显示的私有 token。默认使用 `Authorization: Bearer <token>`；URL query token 仅是显式兼容选项，不要保存或分享它。
 
 保持终端里的 CodexPro 进程运行。你停止它之后，ChatGPT 就无法继续连接本地仓库。Cloudflare quick tunnel 的 URL 也会失效。
 
-## 三种主要模式
+## 四种主要模式
 
-### 1. Normal coding
+### 1. Handoff（默认）
 
-默认模式。ChatGPT 可以在工作区内读取、搜索、写入、精确编辑文件，并运行安全验证命令。
+默认模式让 ChatGPT 读取、搜索和审查工作区，并保存受限的 handoff 或上下文文件。通用源码 `write`/`edit` 不会在标准工具面中出现，bash 也保持关闭。
 
 ```bash
-codexpro start
+codexpro-safe start
 ```
 
-适合小改动、文档更新、定位 bug、查看 diff、跑 lint/test/build。
+适合规划、审查、定位问题和将窄范围计划交给本地执行器。
 
-### 2. Handoff
+### 2. Explicit agent mode
 
-规划模式。ChatGPT 不直接写源码，只写入：
+仅在信任 ChatGPT 会话和当前仓库时，才显式启用工作区写入和安全 bash：
+
+```bash
+codexpro-safe start --mode agent --write workspace --bash safe --tunnel none
+```
+
+此模式才适合小范围源码写入、精确编辑和验证。它不是 Safe 的默认模式。
+
+### 3. Handoff execution
+
+Handoff 计划写入：
 
 ```text
 .ai-bridge/current-plan.md
@@ -173,15 +187,15 @@ codexpro start
 然后你在本地终端决定是否执行：
 
 ```bash
-codexpro execute-handoff --agent opencode --model provider/model --dry-run
-codexpro execute-handoff --agent opencode --model provider/model
+codexpro-safe execute-handoff --agent opencode --model provider/model --dry-run
+codexpro-safe execute-handoff --agent opencode --model provider/model
 ```
 
 也可以启动监听器，让本地终端在计划变更后执行：
 
 ```bash
-codexpro start --mode handoff
-codexpro watch-handoff --agent opencode --model provider/model --yes
+codexpro-safe start --mode handoff
+codexpro-safe watch-handoff --agent opencode --model provider/model --yes
 ```
 
 执行结果会写回：
@@ -194,7 +208,7 @@ codexpro watch-handoff --agent opencode --model provider/model --yes
 
 然后让 ChatGPT 通过 `read_handoff` 或 `codex_context` 审查结果。
 
-### 3. Pro context fallback
+### 4. Pro context fallback
 
 有些 ChatGPT 模型或产品界面不能直接调用 Developer Mode Apps、连接器或 MCP 工具。即使同一个 Plus/Pro 账号可以创建 CodexPro app，某个具体模型界面仍然可能没有工具调用能力。
 

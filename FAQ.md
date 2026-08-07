@@ -15,22 +15,28 @@ Account access and model tool support are separate. A Plus or Pro account can ha
 Install globally once:
 
 ```bash
-npm install -g codexpro
+npm install -g codexpro-safe
 ```
+
+The package/product is **CodexPro-Safe**. After installing it, use the
+canonical `codexpro-safe` command; `codexpro` remains a supported CLI alias and
+is not a separate npm package you need to install.
 
 Then run setup from the repo you want ChatGPT to work on:
 
 ```bash
-codexpro setup
+codexpro-safe setup --save-config
 ```
 
-After setup, daily startup from that same repo is:
+`--save-config` makes saving a workspace profile an explicit choice. To reuse a
+saved profile later, opt in again at launch:
 
 ```bash
-codexpro start
+codexpro-safe start --profile
 ```
 
-`npx codexpro@latest start` still works as a no-install fallback, but the global install is easier for normal users.
+`npx codexpro-safe@latest start` is the no-install fallback. Plain `setup` or
+`start` does not silently save or load a workspace profile.
 
 ## Can Windows start, restart, and stop CodexPro-Safe without terminal windows?
 
@@ -137,7 +143,7 @@ No public tunnel:       local-only mode, only for clients that can reach localho
 
 Cloudflare quick tunnel URLs change on restart. If you put a quick-mode URL into ChatGPT, you must edit the ChatGPT app Server URL every time you restart the tunnel.
 
-For most users, the better path is a free ngrok dev domain. Create a free ngrok account, find your assigned dev domain under Universal Gateway -> Domains, and save that hostname during `codexpro setup`.
+For most users, the better path is a free ngrok dev domain. Create a free ngrok account, find your assigned dev domain under Universal Gateway -> Domains, and use `codexpro-safe setup --save-config` only if you want to save that workspace choice.
 
 If you own a domain, use Cloudflare named tunnels and route DNS to a hostname like `codexpro.example.com`.
 
@@ -154,7 +160,7 @@ Yes, if you use a stable hostname.
 Recommended simple path:
 
 ```bash
-codexpro setup
+codexpro-safe setup --save-config
 # choose ngrok
 # enter your ngrok free dev domain
 ```
@@ -162,10 +168,10 @@ codexpro setup
 After that:
 
 ```bash
-codexpro start
+codexpro-safe start --profile
 ```
 
-The same hostname and CodexPro token are reused for that workspace.
+The same hostname and CodexPro token are reused only when you explicitly launch with `--profile` after saving and reviewing that workspace profile.
 
 ## What if I run CodexPro in two repos at once?
 
@@ -178,7 +184,7 @@ repo A: port 8787, hostname A
 repo B: port 8788, hostname B
 ```
 
-Run `codexpro setup` in each repo and save a profile per workspace.
+Run `codexpro-safe setup --save-config` in each repo only when you want a saved profile per workspace; launch a saved profile with `codexpro-safe start --profile`.
 
 ## Why not use codexpro.github.io?
 
@@ -196,7 +202,7 @@ https://rebel0789.github.io/codexpro/
 
 CodexPro is a local developer bridge, not an OS sandbox.
 
-Use it with repos you trust. Keep token auth enabled for public tunnels. Keep safe bash on unless you know why you need full bash. Read [SECURITY.md](SECURITY.md) before exposing it through a public tunnel.
+Use it with repos you trust. Keep token auth enabled for public tunnels. Bash is off by default. Enable it with `--bash safe` or `--bash full` only when you understand the risk. Read [SECURITY.md](SECURITY.md) before exposing it through a public tunnel.
 
 ## Where are saved settings stored?
 
@@ -215,3 +221,6 @@ codexpro settings delete --yes
 ```
 
 Saved tokens are redacted when profiles are displayed.
+
+Profiles are opt-in: `--save-config` offers to save setup choices, and
+`--profile` explicitly loads them for setup or start.

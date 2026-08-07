@@ -58,21 +58,21 @@ multiple update cycles.
 
 ## Repository map
 
-The expected local repository root is:
+Use `<github-workspace>` as the portable local repository root placeholder:
 
 ```text
-C:\Users\david\Projects\github
+<github-workspace>
 ```
 
-The paths are local navigation hints, not portable product configuration.
+The paths are navigation hints, not portable product configuration.
 
 | Repository | Expected local path | Responsibility and authority |
 | --- | --- | --- |
-| `codexpro-safe` | `C:\Users\david\Projects\github\codexpro-safe` | CodexPro-Safe connector, Windows Manager, startup/tunnel documentation, and this ecosystem map |
-| `codebase-memory-mcp` | `C:\Users\david\Projects\github\codebase-memory-mcp` | Codebase Memory MCP implementation used by project-specific registrations; inspect its current README and Git state before changes |
-| `DarkPrometheus` | `C:\Users\david\Projects\github\DarkPrometheus` | WPF/Desktop product reference; its own `AGENTS.md` governs work there |
-| `DarkPrometheus.Web` | `C:\Users\david\Projects\github\DarkPrometheus.Web` | Web product and product-contract workflows; its own `AGENTS.md` and `.ai-bridge` owners govern work there |
-| `workflow-optimizer` | `C:\Users\david\Projects\github\workflow-optimizer` | Separate product repository with its own `AGENTS.md` and dedicated Codebase Memory registration |
+| `codexpro-safe` | `<github-workspace>\codexpro-safe` | CodexPro-Safe connector, Windows Manager, startup/tunnel documentation, and this ecosystem map |
+| `codebase-memory-mcp` | `<github-workspace>\codebase-memory-mcp` | Codebase Memory MCP implementation used by project-specific registrations; inspect its current README and Git state before changes |
+| `DarkPrometheus` | `<github-workspace>\DarkPrometheus` | WPF/Desktop product reference; its own `AGENTS.md` governs work there |
+| `DarkPrometheus.Web` | `<github-workspace>\DarkPrometheus.Web` | Web product and product-contract workflows; its own `AGENTS.md` and `.ai-bridge` owners govern work there |
+| `workflow-optimizer` | `<github-workspace>\workflow-optimizer` | Separate product repository with its own `AGENTS.md` and dedicated Codebase Memory registration |
 
 Repository proximity does not grant edit scope. A task must explicitly include
 another repository before changing it.

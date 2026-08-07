@@ -1,6 +1,6 @@
 # Public Launch Checklist
 
-CodexPro is a local developer bridge. Treat public launch readiness as two separate gates:
+CodexPro-Safe is a local developer bridge. Treat public launch readiness as two separate gates:
 
 1. The npm package is safe and understandable for local developers.
 2. The ChatGPT app surface is stable enough for users to connect through Developer Mode.
@@ -16,7 +16,7 @@ npm install --package-lock-only
 npm run build
 npm run smoke
 npm pack --dry-run
-codexpro doctor --tunnel none
+codexpro-safe doctor --tunnel none
 ```
 
 The tarball must not include:
@@ -36,15 +36,15 @@ local screenshots or reports
 Before announcing broadly:
 
 - Test in ChatGPT Developer Mode with a fresh app install.
-- Test quick tunnel, saved ngrok domain, and local-only mode.
+- Test local-only default mode, then explicitly selected quick-tunnel and saved-ngrok-profile paths.
 - Refresh actions after widget URI or metadata changes.
 - Confirm CSP stays enabled in Developer Mode.
 - Capture screenshots for:
   - app connection screen
   - `server_config`
   - `open_current_workspace`
-  - one `write`
-  - one `edit`
+  - one handoff or prompt save
+  - one explicitly enabled `write` or `edit`
   - one `search`
   - one failure state
 - Run the same golden prompts on each release and compare behavior.
@@ -52,26 +52,26 @@ Before announcing broadly:
 Suggested golden prompts:
 
 ```text
-Use CodexPro. Call server_config, then open_current_workspace with include_tree=false. Read README.md and summarize the project without editing files.
+Use CodexPro-Safe. Call server_config, then open_current_workspace with include_tree=false. Read README.md and summarize the project without editing files.
 ```
 
 ```text
-Use CodexPro. Create a small static site from PRODUCT.md by writing index.html, styles.css, and README.md. Verify with one targeted search.
+Use CodexPro-Safe in default handoff mode. Read PRODUCT.md and create a narrow implementation plan without editing source files.
 ```
 
 ```text
-Use CodexPro. Try to read .env. Explain why the request is blocked.
+Use CodexPro-Safe. Try to read .env. Explain why the request is blocked.
 ```
 
 ```text
-Use CodexPro. Run bash with pwd, then run bash with a blocked command. Report both outcomes.
+Use CodexPro-Safe in default mode. Confirm that bash is unavailable, then explain that `--bash safe` is an explicit trusted-repository option.
 ```
 
 ## Security Gate
 
 - Keep auth enabled for public tunnels.
-- Keep `CODEXPRO_BASH_MODE=safe` by default.
-- Keep `CODEXPRO_WRITE_MODE=workspace` only for agent mode.
+- Keep bash off by default; enable `--bash safe` or `--bash full` only for a trusted local repository.
+- Keep generic source writes unavailable by default; use workspace writes only in explicit agent mode.
 - Keep blocked path tests for `.env`, `.git`, `node_modules`, private keys, and symlink escapes.
 - Do not broaden allowed roots during setup unless the user explicitly asks.
 - Do not log query strings, tokens, file contents, prompts, or full command output by default.
@@ -81,22 +81,22 @@ Use CodexPro. Run bash with pwd, then run bash with a blocked command. Report bo
 Fresh-user setup should work with:
 
 ```bash
-npx codexpro@latest start
+npx codexpro-safe@latest start
 ```
 
 The terminal must clearly show:
 
 - workspace root
 - current mode
-- public URL strategy
+- local-only default and any explicitly selected public URL strategy
 - that the Server URL is copied
 - that Enter opens ChatGPT connector settings
 - how to stop the process
 
-For stable URLs, `codexpro setup` must save enough profile state so future starts from the same workspace only need:
+For stable URLs, document that saving is opt-in through `codexpro-safe setup --save-config` and reuse is explicit:
 
 ```bash
-codexpro start
+codexpro-safe start --profile
 ```
 
 ## Known Non-Goals For The Current Local Package
