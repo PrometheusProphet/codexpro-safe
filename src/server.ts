@@ -9,7 +9,7 @@ import { repoTree, readTextFile, writeTextFile, editTextFile, ensureAiBridge, so
 import { searchWorkspace } from "./searchOps.js";
 import { runBash } from "./bashOps.js";
 import { gitDiff, gitLog, gitStatus } from "./gitOps.js";
-import { readAiBridgeContext, readCodexContext, workspaceSummary } from "./workspaceOps.js";
+import { readAiBridgeContext, readCodexContext, readWorkspaceInstructions, workspaceSummary } from "./workspaceOps.js";
 import { buildProContext, exportProContext } from "./proContext.js";
 import { codexproInventory, loadSkill } from "./capabilitiesOps.js";
 import { TOOL_CARD_MIME_TYPE, TOOL_CARD_URI, toolCardWidgetHtml } from "./toolCardWidget.js";
@@ -289,6 +289,7 @@ const STANDARD_TOOL_NAMES = [
   "tree",
   "search",
   "load_skill",
+  "read_instructions",
   "read_handoff",
   "save_prompt_file",
   "export_pro_context",
@@ -300,6 +301,7 @@ const FULL_TOOL_NAMES = [
   "codexpro_self_test",
   "codexpro_inventory",
   "load_skill",
+  "read_instructions",
   "list_workspaces",
   "open_current_workspace",
   "open_workspace",
@@ -419,7 +421,7 @@ function serverInstructions(config: CodexProConfig): string {
     "",
     "Preferred workflow:",
     "1. Start with open_current_workspace. Use open_workspace only when the user gives a different root or asks to switch folders.",
-    "2. Follow any AGENTS.md-style instructions returned by the workspace open call before editing files.",
+    "2. Follow the parent and repository instruction bodies returned by the workspace open call before editing files. Use read_instructions again when working below a nested target path.",
     "3. Inspect with tree, search, source_outline, and small read_source_lines ranges. Generic read is advanced/full-mode compatibility.",
     "4. Edit with write/edit only when those tools are advertised. In handoff mode, use save_prompt_file, export_pro_context, or handoff_to_agent.",
     "5. Use bash only for meaningful verification commands such as npm test, npm run build, lint, typecheck, or an existing project script.",
@@ -1125,7 +1127,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         workspace_id: z.string().optional().describe("Workspace id from open_workspace. Omit to use default workspace."),
         include_global_skills: z.boolean().optional().describe("Include user and plugin skill folders. Default: true."),
         include_mcp_servers: z.boolean().optional().describe("Include configured MCP server names from safe config files. Default: true."),
-        max_skills: z.number().int().min(1).max(500).optional().describe("Maximum skills to list. Default: 120.")
+        max_skills: z.number().int().min(1).max(500).optional().describe("Maximum filesystem skill candidates to list. Default: 500.")
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
@@ -1139,7 +1141,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       const inventory = await codexproInventory(config, workspace, {
         includeGlobalSkills: parseBool(args.include_global_skills, true),
         includeMcpServers: parseBool(args.include_mcp_servers, true),
-        maxSkills: limitInt(args.max_skills, 120, 1, 500)
+        maxSkills: limitInt(args.max_skills, 500, 1, 500)
       });
       return textResult(inventory.text, {
         workspace_id: workspace.id,
@@ -1171,7 +1173,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         source: z.enum(["workspace", "user", "plugin", "other"]).optional().describe("Optional source when multiple skills share a name."),
         path: z.string().optional().describe("Exact sanitized path from skill_inventory when name/source are still ambiguous."),
         include_global_skills: z.boolean().optional().describe("Also scan installed user/plugin skills. Default: true."),
-        max_bytes: z.number().int().min(1000).max(100000).optional().describe("Maximum bytes to return from SKILL.md. Default: 40000.")
+        max_bytes: z.number().int().min(1000).max(100000).optional().describe("Maximum bytes to return from SKILL.md. Default: 100000.")
       },
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: {
@@ -1187,7 +1189,8 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         source: args.source,
         path: typeof args.path === "string" ? args.path : undefined,
         includeGlobal: parseBool(args.include_global_skills, true),
-        maxBytes: limitInt(args.max_bytes, 40_000, 1_000, 100_000)
+        maxSkills: 500,
+        maxBytes: limitInt(args.max_bytes, 100_000, 1_000, 100_000)
       });
       const truncated = loaded.truncated ? "\n\n[truncated: increase max_bytes if more context is required]" : "";
       const text = `# Load Skill\n\nName: ${loaded.skill.name}\nSource: ${loaded.skill.source}\nPath: ${loaded.skill.path}\nBytes: ${loaded.bytes}/${loaded.totalBytes}\n\n\`\`\`markdown\n${loaded.text}${truncated}\n\`\`\``;
@@ -1199,6 +1202,43 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         total_bytes: loaded.totalBytes,
         truncated: loaded.truncated,
         text: loaded.text
+      });
+    }
+  );
+
+  registerCodexTool(
+    config,
+    server,
+    "read_instructions",
+    {
+      title: "Read Instructions",
+      description:
+        "Read the bounded parent and repository AGENTS/CHATGPT instruction chain for a workspace target. Instruction-only: never reads .ai-bridge, git status, or diffs.",
+      inputSchema: {
+        workspace_id: z.string().optional().describe("Workspace id from open_workspace. Omit to use the default workspace."),
+        target_path: z.string().optional().describe("Workspace-relative target whose nested instruction chain should apply. Default: ."),
+        max_bytes: z.number().int().min(1000).max(100000).optional().describe("Maximum combined instruction bytes. Default: 100000.")
+      },
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: {
+        ...toolCardMeta(config),
+        "openai/toolInvocation/invoking": "Reading workspace instructions...",
+        "openai/toolInvocation/invoked": "Workspace instructions loaded"
+      }
+    },
+    async (args) => {
+      const workspace = workspaces.getWorkspace(args.workspace_id);
+      const instructions = await readWorkspaceInstructions(config, guard, workspace, {
+        targetPath: typeof args.target_path === "string" ? args.target_path : ".",
+        maxBytes: limitInt(args.max_bytes, 100_000, 1_000, 100_000)
+      });
+      return textResult(`# Workspace Instructions\n\n${instructions.text}`, {
+        workspace_id: workspace.id,
+        root: workspace.root,
+        target_path: typeof args.target_path === "string" ? args.target_path : ".",
+        instruction_files: instructions.files,
+        truncated: instructions.truncated,
+        text: instructions.text
       });
     }
   );
@@ -1262,6 +1302,8 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         root: summary.root,
         agents_loaded: summary.agentsLoaded,
         agents_path: summary.agentsPath,
+        instruction_files: summary.instructionFiles,
+        instructions_truncated: summary.instructionsTruncated,
         skills: summary.skills,
         skill_inventory: summary.skillInventory,
         skill_counts: summary.skillCounts,
@@ -1317,6 +1359,8 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         root: summary.root,
         agents_loaded: summary.agentsLoaded,
         agents_path: summary.agentsPath,
+        instruction_files: summary.instructionFiles,
+        instructions_truncated: summary.instructionsTruncated,
         skills: summary.skills,
         skill_inventory: summary.skillInventory,
         skill_counts: summary.skillCounts,
@@ -1366,6 +1410,8 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         root: workspace.root,
         agents_loaded: summary.agentsLoaded,
         agents_path: summary.agentsPath,
+        instruction_files: summary.instructionFiles,
+        instructions_truncated: summary.instructionsTruncated,
         skills: summary.skills,
         skill_inventory: summary.skillInventory,
         skill_counts: summary.skillCounts,

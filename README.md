@@ -119,19 +119,20 @@ Relevant OpenAI references: [ChatGPT Developer Mode](https://developers.openai.c
 
 CodexPro defaults to `CODEXPRO_TOOL_MODE=standard`, which keeps ChatGPT's tool picker focused on the normal coding loop plus handoff/export workflows. Use `--tool-mode minimal` for the tightest demo surface, or `--tool-mode full` when you want every compatibility and debugging tool exposed.
 
-The smaller default tool list is deliberate. ChatGPT behaves better when routine work goes through a few high-signal tools instead of a large action catalog. Installed user/plugin skills are still discovered during workspace open; they are surfaced as structured workspace context and can be loaded on demand with `load_skill`, not exposed as dozens of separate ChatGPT actions.
+The smaller default tool list is deliberate. Routine work goes through a few high-signal tools. Filesystem skill candidates are discovered during workspace open, surfaced as structured context, and loaded on demand with `load_skill`; discovery does not claim that a skill is selected, invoked, or authoritative.
 
 Standard mode exposes:
 
 - `server_config` — show safety modes, limits, blocked globs, and allowed roots.
 - `codexpro_self_test` — run one local-only diagnostic for modes, expected tools, safe bash policy, `.ai-bridge` write/edit, and selected-only Pro context.
-- `open_current_workspace` — open the configured default workspace without accepting a path. Fastest/safest first call.
-- `open_workspace` — open a local project directory using `root` or `path` and return workspace id, git status, AGENTS.md status, optional skill discovery, and optional file tree.
+- `open_current_workspace` — open the configured default workspace and return the applicable parent/repository instruction bodies. Fastest/safest first call.
+- `open_workspace` — open a local project directory and return workspace id, instruction bodies, git status, optional skill discovery, and optional file tree.
 - `tree` — inspect files.
 - `search` — search code with ripgrep or a Node fallback.
 - `source_outline` — inspect one source file's metadata, imports/exports, top-level symbols, and optional query anchors without returning the full file.
 - `read_source_lines` — read a small bounded, line-numbered source range without Markdown code fences.
 - `load_skill` — load bounded `SKILL.md` instructions for a discovered workspace, user, or plugin skill by name, with optional source/path disambiguation.
+- `read_instructions` — reload only the applicable parent and repository instruction chain for a nested target path; it never reads `.ai-bridge`, Git status, or diffs.
 - `show_changes` — one review-oriented summary with git status, diff stats, and optional diff.
 - `read_handoff` — read `.ai-bridge` files.
 - `save_prompt_file` — save generated Codex prompts as Markdown/text in fixed prompt-only directories; works in handoff mode without enabling source writes.
@@ -567,20 +568,21 @@ Do not call open_workspace after open_current_workspace unless you are switching
 Use search/source_outline first, read_source_lines only for small bounded ranges, one targeted search plus show_changes for review, and bash only for focused build/test/lint verification.
 ```
 
-`open_current_workspace` and `open_workspace` discover workspace, user, and plugin skills by default. Use `include_global_skills=false` when you only want repo-local instructions, or `include_skills=false` when you want the fastest possible open call. `load_skill` only accepts a discovered skill name plus optional source and exact displayed path, then reads that skill's `SKILL.md` with a bounded byte limit; it does not accept arbitrary file paths. If multiple discovered skills still match, CodexPro returns an ambiguity error instead of guessing. `workspace_snapshot` stays narrower by default for speed. In `--tool-mode full`, use `codexpro_inventory` for global/user/plugin skills and MCP server names. `codexpro_inventory` reports names/descriptions and sanitized paths only; it does not expose MCP command arguments or environment values.
+`open_current_workspace` and `open_workspace` return instruction bodies and discover workspace, user, and plugin filesystem candidates by default. Use `include_global_skills=false` to limit skill discovery, or `include_skills=false` for the fastest open call. Inventory records carry a stable record id plus explicit `filesystem-candidate`, exposed, and non-authoritative state. Backup plugin directories are excluded. `load_skill` re-discovers up to 500 candidates, reads up to 100,000 bytes by default, and reports truncation truthfully; it never accepts an arbitrary file path. Ambiguous names require the displayed source/path. `workspace_snapshot` stays narrower by default. In full mode, `codexpro_inventory` lists up to 500 skill candidates and sanitized MCP server names without command arguments or environment values.
 
 ## Codex-style context
 
 CodexPro is not reading Codex's private runtime memory. It gives ChatGPT explicit workspace context through tools:
 
 ```text
-open_current_workspace  root, safety mode, AGENTS.md status, git status
+open_current_workspace  root, parent/repository instruction bodies, safety mode, git status
+read_instructions       instruction-only parent/repository chain for a target path
 codex_context           AGENTS chain, .ai-bridge handoff files, optional git status/diff
 read_handoff            .ai-bridge files only
 workspace_snapshot      larger project snapshot plus .ai-bridge context
 ```
 
-`codex_context` is the closest match to "load what Codex should know." It reads AGENTS-style instruction files from the workspace root down to a target path:
+Use `read_instructions` for governance-only loading. `codex_context` is the broader handoff/debugging call: it reads repository AGENTS-style files and also adds `.ai-bridge` and optional Git context.
 
 ```text
 AGENTS.override.md

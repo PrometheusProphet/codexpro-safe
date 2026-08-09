@@ -21,6 +21,14 @@ export interface WorkspaceSummary {
   skillCounts: Record<string, number>;
   tree?: string;
   gitStatus: string;
+  instructionFiles: string[];
+  instructionsTruncated: boolean;
+}
+
+export interface WorkspaceInstructions {
+  text: string;
+  files: string[];
+  truncated: boolean;
 }
 
 export interface CodexContext {
@@ -145,6 +153,58 @@ async function readAgentsChain(
   };
 }
 
+async function readExactParentInstruction(
+  parentRoot: string,
+  filename: "AGENTS.md" | "CHATGPT.md",
+  maxBytes: number
+): Promise<{ text: string; file: string; truncated: boolean } | undefined> {
+  const target = path.join(parentRoot, filename);
+  try {
+    const entry = await fsp.lstat(target);
+    if (!entry.isFile() || entry.isSymbolicLink()) return undefined;
+    const realParent = await fsp.realpath(parentRoot);
+    const realTarget = await fsp.realpath(target);
+    if (path.dirname(realTarget).toLowerCase() !== realParent.toLowerCase()) return undefined;
+    const bytes = await fsp.readFile(realTarget);
+    const selected = bytes.subarray(0, Math.min(bytes.length, maxBytes));
+    return {
+      text: selected.toString("utf8"),
+      file: `$WORKSPACE_PARENT/${filename}`,
+      truncated: selected.length < bytes.length
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function readWorkspaceInstructions(
+  config: CodexProConfig,
+  guard: PathGuard,
+  workspace: Workspace,
+  options: { targetPath?: string; maxBytes?: number } = {}
+): Promise<WorkspaceInstructions> {
+  const targetPath = options.targetPath ?? ".";
+  guard.resolve(workspace, targetPath);
+  const maximum = Math.max(1_000, Math.min(options.maxBytes ?? 100_000, 100_000));
+  const parentRoot = path.dirname(workspace.root);
+  const parentFiles = await Promise.all([
+    readExactParentInstruction(parentRoot, "AGENTS.md", maximum),
+    readExactParentInstruction(parentRoot, "CHATGPT.md", maximum)
+  ]);
+  const agents = await readAgentsChain(config, guard, workspace, targetPath, maximum);
+  const chunks = parentFiles.filter(Boolean).map((item) => `--- ${item!.file} ---\n${item!.text}`);
+  if (agents.files.length) chunks.push(agents.text);
+  const files = [
+    ...parentFiles.filter(Boolean).map((item) => item!.file),
+    ...agents.files
+  ];
+  let text = chunks.length ? chunks.join("\n\n") : "No workspace instruction files found for this target path.";
+  const bytes = Buffer.from(text, "utf8");
+  const truncated = parentFiles.some((item) => item?.truncated) || bytes.length > maximum;
+  if (bytes.length > maximum) text = `${bytes.subarray(0, maximum).toString("utf8")}\n\n[truncated: narrow target_path or raise max_bytes]`;
+  return { text, files, truncated };
+}
+
 export async function workspaceSummary(
   config: CodexProConfig,
   guard: PathGuard,
@@ -160,10 +220,8 @@ export async function workspaceSummary(
   const skills = skillInventory.map((skill) => skill.name);
   const counts = skillCounts(skillInventory);
   const agentsPath = await findAgentsFile(workspace);
-  let agentsText = "AGENTS.md: none loaded";
-  if (agentsPath) {
-    agentsText = `AGENTS.md: ${agentsPath} (read this file before editing or making project decisions).`;
-  }
+  const instructions = await readWorkspaceInstructions(config, guard, workspace);
+  const agentsText = `## Instructions\n\n${instructions.text}`;
 
   let treeText: string | undefined;
   if (options.includeTree !== false) {
@@ -187,13 +245,15 @@ export async function workspaceSummary(
     text,
     workspaceId: workspace.id,
     root: workspace.root,
-    agentsLoaded: Boolean(agentsPath),
+    agentsLoaded: instructions.files.length > 0,
     agentsPath,
     skills,
     skillInventory,
     skillCounts: counts,
     tree: treeText,
-    gitStatus: status
+    gitStatus: status,
+    instructionFiles: instructions.files,
+    instructionsTruncated: instructions.truncated
   };
 }
 

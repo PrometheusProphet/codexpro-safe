@@ -1,15 +1,20 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import type { CodexProConfig } from "./config.js";
 import type { Workspace } from "./guard.js";
 
 export interface SkillInventoryItem {
+  recordId: string;
   name: string;
   description?: string;
   source: "workspace" | "user" | "plugin" | "other";
   path: string;
+  discovery: "filesystem-candidate";
+  exposedByCodexPro: true;
+  authoritative: false;
 }
 
 interface SkillInventoryRecord extends SkillInventoryItem {
@@ -116,10 +121,14 @@ function compareSkills(a: SkillInventoryItem, b: SkillInventoryItem): number {
 
 function publicSkill(record: SkillInventoryRecord): SkillInventoryItem {
   return {
+    recordId: record.recordId,
     name: record.name,
     description: record.description,
     source: record.source,
-    path: record.path
+    path: record.path,
+    discovery: record.discovery,
+    exposedByCodexPro: record.exposedByCodexPro,
+    authoritative: record.authoritative
   };
 }
 
@@ -133,7 +142,12 @@ async function findSkillFiles(root: string, maxDepth: number, out: string[], max
   const entries = await safeReaddir(root);
   for (const entry of entries) {
     if (out.length >= maxItems) return;
-    if (entry.name === "node_modules" || entry.name === ".git") continue;
+    if (
+      entry.name === "node_modules" ||
+      entry.name === ".git" ||
+      entry.name === "__pycache__" ||
+      /^plugin-backup-/iu.test(entry.name)
+    ) continue;
     const abs = path.join(root, entry.name);
     if (entry.isFile() && entry.name === "SKILL.md") {
       out.push(abs);
@@ -149,7 +163,7 @@ async function discoverSkillRecords(
   workspace: Workspace,
   options: { includeGlobal?: boolean; maxSkills?: number } = {}
 ): Promise<SkillInventoryRecord[]> {
-  const maxSkills = Math.max(1, Math.min(options.maxSkills ?? 120, 500));
+  const maxSkills = Math.max(1, Math.min(options.maxSkills ?? 500, 500));
   const roots = [
     path.join(workspace.root, ".codex", "skills"),
     path.join(workspace.root, ".agents", "skills"),
@@ -179,11 +193,16 @@ async function discoverSkillRecords(
     }
     const name = frontmatterValue(text, "name") ?? path.basename(path.dirname(file));
     const description = frontmatterValue(text, "description");
+    const shownPath = displayPath(file, workspace.root);
     items.push({
+      recordId: `${skillSource(file, workspace.root)}:${createHash("sha256").update(shownPath).digest("hex").slice(0, 16)}`,
       name,
       description,
       source: skillSource(file, workspace.root),
-      path: displayPath(file, workspace.root),
+      path: shownPath,
+      discovery: "filesystem-candidate",
+      exposedByCodexPro: true,
+      authoritative: false,
       absPath: file
     });
   }
@@ -241,7 +260,7 @@ export async function loadSkill(
   if (path.basename(skill.absPath) !== "SKILL.md") {
     throw new Error(`Refusing to load non-skill file: ${skill.path}`);
   }
-  const maxBytes = Math.max(1_000, Math.min(options.maxBytes ?? 40_000, 100_000));
+  const maxBytes = Math.max(1_000, Math.min(options.maxBytes ?? 100_000, 100_000));
   const loaded = await readTextWithStats(skill.absPath, maxBytes);
   return {
     skill: publicSkill(skill),

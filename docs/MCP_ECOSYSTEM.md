@@ -69,9 +69,9 @@ The paths are navigation hints, not portable product configuration.
 | Repository | Expected local path | Responsibility and authority |
 | --- | --- | --- |
 | `codexpro-safe` | `<github-workspace>\codexpro-safe` | CodexPro-Safe connector, Windows Manager, startup/tunnel documentation, and this ecosystem map |
-| `codebase-memory-mcp` | `<github-workspace>\codebase-memory-mcp` | Codebase Memory MCP implementation used by project-specific registrations; inspect its current README and Git state before changes |
-| `DarkPrometheus` | `<github-workspace>\DarkPrometheus` | WPF/Desktop product reference; its own `AGENTS.md` governs work there |
-| `DarkPrometheus.Web` | `<github-workspace>\DarkPrometheus.Web` | Web product and product-contract workflows; its own `AGENTS.md` and `.ai-bridge` owners govern work there |
+| `codebase-memory-mcp` | `<github-workspace>\codebase-memory-mcp` | External read-only Codebase Memory MCP reference; inspect only unless David explicitly authorizes a bounded destination |
+| `DarkPrometheus` | `<github-workspace>\DarkPrometheus` | Inactive WPF/Desktop reference; no routine development or maintenance |
+| `DarkPrometheus.Web` | `<github-workspace>\DarkPrometheus.Web` | Inactive web reference; no routine product-contract or deployment work |
 | `workflow-optimizer` | `<github-workspace>\workflow-optimizer` | Separate product repository with its own `AGENTS.md` and dedicated Codebase Memory registration |
 
 Repository proximity does not grant edit scope. A task must explicitly include
@@ -81,12 +81,13 @@ another repository before changing it.
 
 When facts conflict, use this order:
 
-1. Current source and configuration in the owning repository
-2. Current Git branch, status, and commit history
-3. The owning repository's `AGENTS.md` and focused documentation
-4. Current sanitized runtime inspection
-5. `.ai-bridge/mcp-runtime-status.md`
-6. Old handoffs, research reports, screenshots, and conversation memory
+1. David's current explicit instruction
+2. The installed workspace parent router and closest repository `AGENTS.md`
+3. Current tracked owners, source, and configuration
+4. Current Git branch, status, and commit history
+5. Current sanitized runtime inspection
+6. `.ai-bridge/mcp-runtime-status.md`
+7. Old handoffs, research reports, screenshots, and conversation memory
 
 Runtime state can legitimately differ from tracked architecture. Report that
 drift rather than rewriting stable documentation to match a transient incident.

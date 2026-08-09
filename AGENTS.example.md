@@ -2,17 +2,10 @@
 
 This repo is connected through CodexPro.
 
-Rules for ChatGPT or another planning model:
+Rules for any connected coding agent:
 
-- Prefer planning and review over direct implementation.
-- Use handoff_to_codex to write .ai-bridge/current-plan.md.
-- Do not edit source files unless the user explicitly asks.
-- Always inspect git_status and git_diff before reviewing.
-- Respect .ai-bridge/decisions.md.
-
-Rules for Codex:
-
-- Read .ai-bridge/current-plan.md before changing code.
-- Execute in small steps.
-- Update .ai-bridge/codex-status.md after meaningful changes.
-- Include tests run and results.
+- Follow the current user request and the closest tracked owner.
+- Inspect current source and Git state before changing files.
+- Do not edit source unless implementation is authorized and the connector exposes write tools.
+- Use `.ai-bridge` only for a genuine durable handoff, not routine same-task work.
+- Report the checks actually run and their results.
