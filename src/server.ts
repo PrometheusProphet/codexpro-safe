@@ -1278,8 +1278,8 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       inputSchema: {
         include_tree: z.boolean().optional().describe("Include a compact file tree. Default: false for speed."),
         max_depth: z.number().int().min(1).max(8).optional().describe("Tree depth when include_tree=true. Default: 2."),
-        include_skills: z.boolean().optional().describe("Discover workspace, user, and plugin skills by name/description. Default: true."),
-        include_global_skills: z.boolean().optional().describe("Also scan installed user/plugin skills when include_skills=true. Default: true.")
+        include_skills: z.boolean().optional().describe("Discover repository-local skills by name/description. Default: true."),
+        include_global_skills: z.boolean().optional().describe("Also scan installed user/plugin skills when include_skills=true. Default: false.")
       },
       annotations: SESSION_READ_ANNOTATIONS,
       _meta: {
@@ -1294,7 +1294,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         includeTree: parseBool(args.include_tree, false),
         maxDepth: limitInt(args.max_depth, 2, 1, 8),
         includeSkills: parseBool(args.include_skills, true),
-        includeGlobalSkills: parseBool(args.include_global_skills, true),
+        includeGlobalSkills: parseBool(args.include_global_skills, false),
         bootstrapContext: false
       });
       return textResult(summary.text, {
@@ -1330,8 +1330,8 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         include_tree: z.boolean().optional().describe("Include a compact file tree. Default: true."),
         max_depth: z.number().int().min(1).max(8).optional().describe("Tree depth. Default: 3."),
         max_files: z.number().int().min(1).max(3000).optional().describe("Alias for maximum tree entries. Default: 500."),
-        include_skills: z.boolean().optional().describe("Discover workspace, user, and plugin skills by name/description. Default: true."),
-        include_global_skills: z.boolean().optional().describe("Also scan installed user/plugin skills when include_skills=true. Default: true."),
+        include_skills: z.boolean().optional().describe("Discover repository-local skills by name/description. Default: true."),
+        include_global_skills: z.boolean().optional().describe("Also scan installed user/plugin skills when include_skills=true. Default: false."),
         bootstrap_context: z.boolean().optional().describe("Deprecated and ignored. Use handoff_to_agent to create .ai-bridge files.")
       },
       annotations: SESSION_READ_ANNOTATIONS,
@@ -1351,7 +1351,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         maxDepth: limitInt(args.max_depth, 3, 1, 8),
         maxEntries: limitInt(args.max_files, 500, 1, 3000),
         includeSkills: parseBool(args.include_skills, true),
-        includeGlobalSkills: parseBool(args.include_global_skills, true),
+        includeGlobalSkills: parseBool(args.include_global_skills, false),
         bootstrapContext: false
       });
       return textResult(summary.text, {
@@ -1753,7 +1753,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       const validationText = result.validation
         ? `\nValidation: ${result.validation.policy} ${result.validation.verdict}`
         : "";
-      const text = `# Save Prompt File\n\nSaved: ${result.path}\nTarget: ${result.target}\nExisted before: ${result.existed}\nBytes: ${result.bytes}\nSHA-256: ${result.sha256}\nDiff stats: +${result.additions} -${result.deletions}${validationText}`;
+      const text = `# Save Prompt File\n\nSaved: ${result.path}\nTarget: ${result.target}\nExisted before: ${result.existed}\nBytes: ${result.bytes}\nSHA-256: ${result.sha256}\nDiff stats: +${result.additions} -${result.deletions}\nRetired prompt files: ${result.retiredPromptFiles}${validationText}`;
       return textResult(text, {
         workspace_id: workspace.id,
         root: workspace.root,
@@ -1765,6 +1765,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
         additions: result.additions,
         deletions: result.deletions,
         changed: result.changed,
+        retired_prompt_files: result.retiredPromptFiles,
         validation: result.validation
       });
     }

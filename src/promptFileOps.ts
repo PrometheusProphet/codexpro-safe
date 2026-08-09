@@ -1,4 +1,5 @@
 import path from "node:path";
+import fsp from "node:fs/promises";
 import type { CodexProConfig } from "./config.js";
 import type { Workspace } from "./guard.js";
 import { CodexProError, PathGuard } from "./guard.js";
@@ -19,6 +20,8 @@ const PROMPT_TARGET_DIRS: Record<PromptFileTarget, (config: CodexProConfig) => s
 const ALLOWED_TARGETS = new Set<PromptFileTarget>(["ai_bridge", "chatgpt_generated", "loop_inbox"]);
 const ALLOWED_EXTENSIONS = new Set([".md", ".txt"]);
 const CONTROL_CHARS = /[\x00-\x1f\x7f]/;
+const MAX_ACTIVE_AI_BRIDGE_PROMPTS = 20;
+const RETENTION_MANIFEST = ".retain.json";
 
 export interface SavePromptFileInput {
   target?: PromptFileTarget;
@@ -38,6 +41,7 @@ export interface SavePromptFileResult {
   additions: number;
   deletions: number;
   changed: boolean;
+  retiredPromptFiles: number;
   validation?: PromptValidationResult;
 }
 
@@ -112,6 +116,34 @@ function persistedPromptContent(prompt: string): string {
   return `${prompt.trimEnd()}\n`;
 }
 
+async function retainedPromptNames(directory: string): Promise<Set<string>> {
+  const retained = new Set<string>(); const manifest = path.join(directory, RETENTION_MANIFEST);
+  try {
+    const stat = await fsp.lstat(manifest); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16 * 1024) return retained;
+    const parsed = JSON.parse(await fsp.readFile(manifest, "utf8"));
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.retain) || parsed.retain.length > 100) return retained;
+    for (const value of parsed.retain) if (typeof value === "string") retained.add(validateSuppliedFilename(value));
+  } catch { /* An absent or invalid optional manifest retains nothing. */ }
+  return retained;
+}
+
+async function pruneAiBridgePrompts(guard: PathGuard, workspace: Workspace, targetDir: string, savedFilename: string): Promise<number> {
+  const directory = guard.resolve(workspace, targetDir, { forWrite: true }).absPath;
+  const retained = await retainedPromptNames(directory); retained.add(savedFilename);
+  const candidates: Array<{ name: string; modified: number }> = [];
+  for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
+    if (!entry.isFile() || entry.isSymbolicLink() || !ALLOWED_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+    const resolved = guard.resolve(workspace, `${targetDir}/${entry.name}`, { forWrite: true });
+    const stat = await fsp.lstat(resolved.absPath); if (!stat.isFile() || stat.isSymbolicLink()) continue;
+    candidates.push({ name: entry.name, modified: stat.mtimeMs });
+  }
+  const fixed = candidates.filter((item) => retained.has(item.name));
+  const ordinary = candidates.filter((item) => !retained.has(item.name)).sort((left, right) => right.modified - left.modified || right.name.localeCompare(left.name));
+  const keepOrdinary = Math.max(0, MAX_ACTIVE_AI_BRIDGE_PROMPTS - fixed.length); let retired = 0;
+  for (const item of ordinary.slice(keepOrdinary)) { await fsp.unlink(guard.resolve(workspace, `${targetDir}/${item.name}`, { forWrite: true }).absPath); retired += 1; }
+  return retired;
+}
+
 export async function savePromptFile(
   config: CodexProConfig,
   guard: PathGuard,
@@ -136,6 +168,7 @@ export async function savePromptFile(
     createDirs: true,
     overwrite: input.overwrite
   });
+  const retiredPromptFiles = target === "ai_bridge" ? await pruneAiBridgePrompts(guard, workspace, targetDir, filename) : 0;
 
   return {
     target,
@@ -146,6 +179,7 @@ export async function savePromptFile(
     additions: result.diff.additions,
     deletions: result.diff.deletions,
     changed: result.diff.changed,
+    retiredPromptFiles,
     validation
   };
 }

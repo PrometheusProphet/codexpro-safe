@@ -48,6 +48,12 @@ namespace CodexProSafeDiagnosticHelper
                     if (partial.status != "budget_exhausted" || partial.complete || partial.limitation != "entries" || partial.entries.Count != 0) return 17;
                     if (provider.HashFile(text.entryId, MaintenanceFilesystemProvider.MaximumHashBytes).status != "invalid_entry") return 18;
 
+                    MaintenanceWalkRequest shallowRequest = DefaultWalk();
+                    shallowRequest.maxDepth = 1;
+                    MaintenanceWalkResponse shallow = provider.Walk(shallowRequest);
+                    if (shallow.status != "budget_exhausted" || shallow.complete || shallow.limitation != "depth") return 34;
+                    if (!shallow.entries.Any(item => item.relativePath == "swap-read.txt") || shallow.entries.Any(item => item.relativePath == "nested/binary.dat")) return 35;
+
                     MaintenanceWalkResponse validAgain = provider.Walk(DefaultWalk());
                     MaintenanceEntry currentText = validAgain.entries.Single(item => item.relativePath == "alpha.txt");
                     MaintenanceWalkRequest invalidWalk = DefaultWalk();

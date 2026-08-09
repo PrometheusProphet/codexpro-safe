@@ -215,7 +215,7 @@ export async function workspaceSummary(
     await ensureAiBridge(config, guard, workspace);
   }
   const skillInventory = options.includeSkills
-    ? await discoverSkillInventory(workspace, { includeGlobal: options.includeGlobalSkills !== false, maxSkills: 120 })
+    ? await discoverSkillInventory(workspace, { includeGlobal: options.includeGlobalSkills === true, maxSkills: 500 })
     : [];
   const skills = skillInventory.map((skill) => skill.name);
   const counts = skillCounts(skillInventory);

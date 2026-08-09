@@ -81,7 +81,9 @@ Each entry contains only an opaque sequential `entryId`, a normalized
 `/`-separated relative path, `file|directory|reparse|other`, regular-file byte
 size, modified UTC time, and a fixed sanitized attribute string. Enumeration is
 depth-first after sorting each directory ordinal-ignore-case with an ordinal
-tie break. Reparse points are classified but never followed. Case-insensitive
+tie break. Reaching `maxDepth` skips deeper descendants but continues enumerating
+siblings at the requested depth; the result remains incomplete with the `depth`
+limitation. Reparse points are classified but never followed. Case-insensitive
 namespace ambiguity fails the walk.
 
 IDs do not encode paths or content. They refer only to immutable identity and

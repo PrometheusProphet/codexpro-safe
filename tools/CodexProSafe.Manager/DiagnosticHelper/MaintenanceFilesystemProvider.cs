@@ -115,6 +115,7 @@ namespace CodexProSafeDiagnosticHelper
                 state.RootIdentity = MaintenanceNativeMethods.CaptureIdentity(rootHandle);
                 WalkDirectory(rootHandle, new string[0], new MaintenanceIdentity[0], 0, state);
                 if (state.Exhausted == null && clock.ElapsedMilliseconds >= request.maxDurationMs) state.Exhausted = "duration";
+                if (state.Exhausted == null && state.DepthLimited) state.Exhausted = "depth";
                 if (state.Exhausted != null)
                 {
                     response.status = "budget_exhausted";
@@ -347,9 +348,12 @@ namespace CodexProSafeDiagnosticHelper
                     });
                     if (kind == "directory")
                     {
-                        if (depth + 1 >= state.Request.maxDepth) { state.Exhausted = "depth"; return; }
-                        WalkDirectory(opened, chain, nextAncestors, depth + 1, state);
-                        if (state.Exhausted != null) return;
+                        if (depth + 1 >= state.Request.maxDepth) state.DepthLimited = true;
+                        else
+                        {
+                            WalkDirectory(opened, chain, nextAncestors, depth + 1, state);
+                            if (state.Exhausted != null) return;
+                        }
                     }
                 }
                 finally { if (opened != null) opened.Dispose(); }
@@ -501,6 +505,7 @@ namespace CodexProSafeDiagnosticHelper
             internal long ObservedBytes;
             internal int VisitedEntries;
             internal string Exhausted;
+            internal bool DepthLimited;
             internal MaintenanceIdentity RootIdentity;
 
             internal WalkState(MaintenanceWalkRequest request, MaintenanceWalkResponse response, Dictionary<string, MaintenanceSnapshotRecord> snapshot, long generation, Stopwatch clock)
