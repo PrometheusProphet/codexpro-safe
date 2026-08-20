@@ -73,23 +73,32 @@ namespace CodexProSafeManager
                 managerExecutable,
                 modeOutput,
                 new SyntheticManagerExclusiveLeaseProvider());
+            LastStage = "privacy-mode-exit";
             Assert(modeExit == OperationalCommands.SuccessExitCode, "mode command success");
+            LastStage = "privacy-mode-output";
             Assert(modeOutput.ToString().Trim() ==
                 "{\"schema\":\"codexpro-manager-command-v1\",\"command\":\"set-codex-diagnostics\",\"status\":\"ok\",\"mode\":\"read\",\"restartRequired\":true}",
                 "mode command fixed output");
+            LastStage = "privacy-mode-redaction";
             AssertSafeOutput(
                 modeOutput.ToString(), syntheticSecret, syntheticOrganization, syntheticProfile,
                 settings.RepositoryPath, settings.WorkspaceRoot, settings.NodePath,
                 settings.DiagnosticHelperPath, settings.DiagnosticHelperSha256);
 
+            LastStage = "privacy-mode-load";
             AppSettings updated = store.LoadExisting();
             Assert(updated.CodexDiagnosticReadMode == "read", "mode changed only");
+            LastStage = "privacy-mode-preserve";
             AssertEquivalent(beforeValues, SnapshotExceptMode(updated), "settings preserved");
+            LastStage = "privacy-mode-unknown";
             Assert(store.SyntheticPropertyEqualsForSelfTest("FutureSyntheticSetting", futureValue), "unknown setting preserved");
+            LastStage = "privacy-mode-acl";
             string afterSecurity = File.GetAccessControl(store.SettingsPath, securitySections)
                 .GetSecurityDescriptorSddlForm(securitySections);
             Assert(beforeSecurity == afterSecurity, "settings security descriptor preserved");
+            LastStage = "privacy-mode-temp";
             AssertNoTemporaryFiles(settingsRoot);
+            LastStage = "privacy-mode-ciphertext";
             Assert(!ContainsBytes(File.ReadAllBytes(store.SettingsPath), Encoding.UTF8.GetBytes(syntheticSecret)), "settings ciphertext hides secret");
 
             string unchangedHash = HashFile(store.SettingsPath);
