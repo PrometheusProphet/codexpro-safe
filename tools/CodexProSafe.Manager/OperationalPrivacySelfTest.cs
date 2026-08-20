@@ -74,7 +74,6 @@ namespace CodexProSafeManager
                 modeOutput,
                 new SyntheticManagerExclusiveLeaseProvider(),
                 delegate(Exception exception) { LastStage = "privacy-mode-" + ClassifyModeFailure(exception); });
-            LastStage = "privacy-mode-exit";
             Assert(modeExit == OperationalCommands.SuccessExitCode, "mode command success");
             LastStage = "privacy-mode-output";
             Assert(modeOutput.ToString().Trim() ==
