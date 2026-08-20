@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Made maintenance-helper termination wait for child stdio to close before
+  rejecting a pending request, so a valid final framed response cannot lose a
+  race against the earlier process `exit` event.
 - Refreshed the MCP SDK and path-matching dependency tree to patched versions,
   added a serialized Windows CI gate for Manager, native diagnostic, privacy,
   and maintenance-filesystem boundaries, and limited the npm package to the

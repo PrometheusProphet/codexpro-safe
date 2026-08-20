@@ -164,7 +164,7 @@ export class ManagedWindowsMaintenanceFsBoundary implements WindowsMaintenanceFs
       if (this.stderrBytes > STDERR_LIMIT_BYTES) this.fail(new Error("maintenance filesystem helper stderr limit exceeded"));
     });
     child.on("error", () => this.fail(new Error("maintenance filesystem helper failed to start")));
-    child.on("exit", () => this.fail(new Error("maintenance filesystem helper exited")));
+    child.once("close", () => this.fail(new Error("maintenance filesystem helper exited")));
 
     const bind = await this.enqueue({
       protocol: MAINTENANCE_FS_LAUNCHER_PROTOCOL,
