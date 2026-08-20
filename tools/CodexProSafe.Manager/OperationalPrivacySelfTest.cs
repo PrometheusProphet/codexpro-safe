@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -23,6 +24,7 @@ namespace CodexProSafeManager
             Directory.CreateDirectory(root);
             try
             {
+                RunAclContractTests(root);
                 RunCommandAndSettingsTests(root, managerExecutable);
                 RunLogAndAccessibilityTests(root);
             }
@@ -30,6 +32,44 @@ namespace CodexProSafeManager
             {
                 if (Directory.Exists(root)) Directory.Delete(root, true);
             }
+        }
+
+        private static void RunAclContractTests(string root)
+        {
+            LastStage = "privacy-acl-contract-prepare";
+            string inheritedA = Path.Combine(root, "acl-a");
+            string inheritedB = Path.Combine(root, "acl-b");
+            Directory.CreateDirectory(inheritedA);
+            Directory.CreateDirectory(inheritedB);
+
+            SecurityIdentifier everyone = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+            DirectorySecurity parentSecurity = Directory.GetAccessControl(inheritedB);
+            parentSecurity.AddAccessRule(new FileSystemAccessRule(
+                everyone,
+                FileSystemRights.WriteAttributes,
+                InheritanceFlags.ObjectInherit,
+                PropagationFlags.InheritOnly,
+                AccessControlType.Deny));
+            Directory.SetAccessControl(inheritedB, parentSecurity);
+
+            string fileA = Path.Combine(inheritedA, "settings.dat");
+            string fileB = Path.Combine(inheritedB, "settings.dat");
+            File.WriteAllText(fileA, "a");
+            File.WriteAllText(fileB, "b");
+            AccessControlSections sections = AccessControlSections.Access | AccessControlSections.Owner | AccessControlSections.Group;
+            FileSecurity securityA = File.GetAccessControl(fileA, sections);
+            FileSecurity securityB = File.GetAccessControl(fileB, sections);
+
+            LastStage = "privacy-acl-contract-inherited";
+            Assert(SecureSettingsStore.SecurityEquivalent(securityA, securityB), "inherited rules derive from parent");
+
+            FileSecurity explicitSecurity = File.GetAccessControl(fileB, sections);
+            explicitSecurity.AddAccessRule(new FileSystemAccessRule(
+                everyone,
+                FileSystemRights.ReadPermissions,
+                AccessControlType.Allow));
+            LastStage = "privacy-acl-contract-explicit";
+            Assert(!SecureSettingsStore.SecurityEquivalent(securityA, explicitSecurity), "explicit rules remain authoritative");
         }
 
         private static void RunCommandAndSettingsTests(string root, string managerExecutable)
@@ -60,6 +100,12 @@ namespace CodexProSafeManager
             store.SaveSyntheticForSelfTest(
                 settings,
                 new Dictionary<string, object> { { "FutureSyntheticSetting", futureValue } });
+            FileSecurity explicitSettingsSecurity = File.GetAccessControl(store.SettingsPath);
+            explicitSettingsSecurity.AddAccessRule(new FileSystemAccessRule(
+                new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                FileSystemRights.ReadPermissions,
+                AccessControlType.Allow));
+            File.SetAccessControl(store.SettingsPath, explicitSettingsSecurity);
             IDictionary<string, object> beforeValues = SnapshotExceptMode(store.LoadExisting());
             AccessControlSections securitySections = AccessControlSections.Access | AccessControlSections.Owner | AccessControlSections.Group;
             FileSecurity beforeSecurity = File.GetAccessControl(store.SettingsPath, securitySections);
@@ -71,8 +117,7 @@ namespace CodexProSafeManager
                 store,
                 managerExecutable,
                 modeOutput,
-                new SyntheticManagerExclusiveLeaseProvider(),
-                delegate(Exception exception) { LastStage = "privacy-mode-" + ClassifyModeFailure(exception); });
+                new SyntheticManagerExclusiveLeaseProvider());
             Assert(modeExit == OperationalCommands.SuccessExitCode, "mode command success");
             LastStage = "privacy-mode-output";
             Assert(modeOutput.ToString().Trim() ==
@@ -314,34 +359,6 @@ namespace CodexProSafeManager
             using (SHA256 algorithm = SHA256.Create())
             using (FileStream stream = File.OpenRead(path))
                 return Convert.ToBase64String(algorithm.ComputeHash(stream));
-        }
-
-        private static string ClassifyModeFailure(Exception exception)
-        {
-            Exception current = exception;
-            while (current != null)
-            {
-                if (current is CryptographicException) return "crypto";
-                if (current is UnauthorizedAccessException) return "access";
-                if (current is IOException) return "io";
-                if (current is System.ComponentModel.Win32Exception) return "win32";
-                if (current is PlatformNotSupportedException || current is NotSupportedException) return "platform";
-                if (current is ArgumentException) return "argument";
-                if (current is InvalidOperationException)
-                {
-                    if (current.Message.IndexOf("diagnostic helper", StringComparison.OrdinalIgnoreCase) >= 0) return "trust";
-                    if (current.Message.IndexOf("security descriptor", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        foreach (string difference in new[] { "owner", "group", "protection", "invalid-rule", "rule-count", "rule-set", "missing" })
-                            if (current.Message.IndexOf(": " + difference + ".", StringComparison.OrdinalIgnoreCase) >= 0)
-                                return "acl-" + difference;
-                        return "acl";
-                    }
-                    if (current.Message.IndexOf("settings are busy", StringComparison.OrdinalIgnoreCase) >= 0) return "busy";
-                }
-                current = current.InnerException;
-            }
-            return exception is InvalidOperationException ? "validation" : "unexpected";
         }
 
         private static bool ContainsBytes(byte[] haystack, byte[] needle)

@@ -41,10 +41,10 @@
   accumulated log text from UI Automation while retaining accessible status
   and action controls.
 - Made the Manager's post-replacement ACL proof compare the preserved owner,
-  group, DACL protection, and canonical effective-access rule set instead of raw
-  security-descriptor bytes, accepting Windows' legal descriptor
-  canonicalization, duplicate-ACE removal, and equivalent ACE splitting or
-  merging without weakening the fail-closed effective-access postcondition.
+  group, DACL protection, and canonical explicit-access rule set instead of raw
+  security-descriptor bytes. Replacement files receive those file-owned
+  properties explicitly, while inherited ACEs are re-derived from the unchanged
+  parent directory rather than copied as unstable file-owned state.
 - Closed the direct-connector diagnostic launch bypass. A `read` request now
   remains effectively off until an expiring one-shot Windows pipe handshake
   mutually binds the fixed installed Manager process to a private capability

@@ -197,7 +197,7 @@ namespace CodexProSafeManager
                     stream.Flush(true);
                 }
 
-                if (existingSecurity != null) File.SetAccessControl(temporaryPath, existingSecurity);
+                if (existingSecurity != null) ApplyPreservedSecurity(temporaryPath, existingSecurity);
                 if (File.Exists(settingsPath)) File.Replace(temporaryPath, settingsPath, null, false);
                 else File.Move(temporaryPath, settingsPath);
 
@@ -206,7 +206,7 @@ namespace CodexProSafeManager
                     FileSecurity actualSecurity = File.GetAccessControl(settingsPath, PreservedSecuritySections);
                     if (!SecurityEquivalent(existingSecurity, actualSecurity))
                     {
-                        File.SetAccessControl(settingsPath, existingSecurity);
+                        ApplyPreservedSecurity(settingsPath, existingSecurity);
                         actualSecurity = File.GetAccessControl(settingsPath, PreservedSecuritySections);
                         if (!SecurityEquivalent(existingSecurity, actualSecurity))
                             throw new InvalidOperationException(
@@ -249,10 +249,35 @@ namespace CodexProSafeManager
             return "none";
         }
 
+        private static void ApplyPreservedSecurity(string path, FileSecurity expected)
+        {
+            FileSecurity replacement = File.GetAccessControl(path, PreservedSecuritySections);
+            replacement.SetOwner(expected.GetOwner(typeof(SecurityIdentifier)));
+            replacement.SetGroup(expected.GetGroup(typeof(SecurityIdentifier)));
+            replacement.SetAccessRuleProtection(expected.AreAccessRulesProtected, false);
+
+            AuthorizationRuleCollection replacementRules = replacement.GetAccessRules(true, false, typeof(SecurityIdentifier));
+            foreach (AuthorizationRule authorizationRule in replacementRules)
+            {
+                FileSystemAccessRule rule = authorizationRule as FileSystemAccessRule;
+                if (rule == null) throw new InvalidOperationException("The replacement settings ACL contained an unsupported rule.");
+                replacement.RemoveAccessRuleSpecific(rule);
+            }
+
+            AuthorizationRuleCollection expectedRules = expected.GetAccessRules(true, false, typeof(SecurityIdentifier));
+            foreach (AuthorizationRule authorizationRule in expectedRules)
+            {
+                FileSystemAccessRule rule = authorizationRule as FileSystemAccessRule;
+                if (rule == null) throw new InvalidOperationException("The existing settings ACL contained an unsupported rule.");
+                replacement.AddAccessRule(rule);
+            }
+            File.SetAccessControl(path, replacement);
+        }
+
         private static List<string> AccessRuleSignatures(FileSecurity security)
         {
             Dictionary<string, int> effectiveRights = new Dictionary<string, int>(StringComparer.Ordinal);
-            AuthorizationRuleCollection rules = security.GetAccessRules(true, true, typeof(SecurityIdentifier));
+            AuthorizationRuleCollection rules = security.GetAccessRules(true, false, typeof(SecurityIdentifier));
             foreach (AuthorizationRule authorizationRule in rules)
             {
                 FileSystemAccessRule rule = authorizationRule as FileSystemAccessRule;
