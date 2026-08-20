@@ -92,9 +92,10 @@ namespace CodexProSafeManager
             AssertEquivalent(beforeValues, SnapshotExceptMode(updated), "settings preserved");
             LastStage = "privacy-mode-unknown";
             Assert(store.SyntheticPropertyEqualsForSelfTest("FutureSyntheticSetting", futureValue), "unknown setting preserved");
-            LastStage = "privacy-mode-acl";
+            LastStage = "privacy-mode-acl-read";
             byte[] afterSecurity = File.GetAccessControl(store.SettingsPath, securitySections)
                 .GetSecurityDescriptorBinaryForm();
+            LastStage = "privacy-mode-acl-compare";
             Assert(EqualBytes(beforeSecurity, afterSecurity), "settings security descriptor preserved");
             LastStage = "privacy-mode-temp";
             AssertNoTemporaryFiles(settingsRoot);
