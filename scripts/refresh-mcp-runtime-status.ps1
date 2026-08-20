@@ -8,6 +8,19 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 
+function Get-Sha256Hex {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $stream = [System.IO.File]::OpenRead($LiteralPath)
+    try {
+        $hasher = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([System.BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        }
+        finally { $hasher.Dispose() }
+    }
+    finally { $stream.Dispose() }
+}
+
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path $repoRoot ".ai-bridge\mcp-runtime-status.md"
@@ -166,7 +179,7 @@ $managerPath = Join-Path $env:LOCALAPPDATA `
 $managerVersion = Get-FileVersionText -Path $managerPath
 $managerHash = "unavailable"
 if (Test-Path -LiteralPath $managerPath -PathType Leaf) {
-    $managerHash = (Get-FileHash -LiteralPath $managerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $managerHash = Get-Sha256Hex -LiteralPath $managerPath
 }
 $managerProcess = Get-ProcessObservation -Names @("CodexProSafe.Manager")
 $tunnelProcess = Get-ProcessObservation -Names @("tunnel-client")

@@ -5,6 +5,20 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+
+function Get-Sha256Hex {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $stream = [System.IO.File]::OpenRead($LiteralPath)
+    try {
+        $hasher = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([System.BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        }
+        finally { $hasher.Dispose() }
+    }
+    finally { $stream.Dispose() }
+}
+
 $project = Split-Path -Parent $MyInvocation.MyCommand.Path
 $bin = Join-Path $project 'bin'
 $obj = Join-Path $project 'obj'
@@ -70,7 +84,7 @@ if (-not $SkipSelfTest) {
     }
 }
 
-$helperHash = (Get-FileHash -LiteralPath $helperOutput -Algorithm SHA256).Hash.ToLowerInvariant()
+$helperHash = Get-Sha256Hex -LiteralPath $helperOutput
 $helperManifest = Join-Path $bin 'CodexProSafe.DiagnosticHelper.json'
 [pscustomobject]@{
     protocolVersion = 'codexpro-diagnostic-v1'
@@ -121,10 +135,10 @@ if (-not $SkipSelfTest) {
     }
 }
 
-$hash = Get-FileHash -LiteralPath $output -Algorithm SHA256
+$hash = Get-Sha256Hex -LiteralPath $output
 [pscustomobject]@{
     Executable = $output
-    Sha256 = $hash.Hash.ToLowerInvariant()
+    Sha256 = $hash
     DiagnosticHelper = $helperOutput
     DiagnosticHelperSha256 = $helperHash
     SelfTest = if ($SkipSelfTest) { 'skipped' } else { 'passed' }

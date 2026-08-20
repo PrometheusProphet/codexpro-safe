@@ -8,6 +8,20 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+
+function Get-Sha256Hex {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $stream = [System.IO.File]::OpenRead($LiteralPath)
+    try {
+        $hasher = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([System.BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        }
+        finally { $hasher.Dispose() }
+    }
+    finally { $stream.Dispose() }
+}
+
 $project = Split-Path -Parent $MyInvocation.MyCommand.Path
 $source = Join-Path $project 'bin\CodexProSafe.Manager.exe'
 $helperSource = Join-Path $project 'bin\CodexProSafe.DiagnosticHelper.exe'
@@ -64,8 +78,8 @@ $result = [pscustomobject]@{
     Executable = $installedExecutable
     DiagnosticHelper = $installedHelper
     Shortcut = $shortcutPath
-    Sha256 = (Get-FileHash -LiteralPath $installedExecutable -Algorithm SHA256).Hash.ToLowerInvariant()
-    DiagnosticHelperSha256 = (Get-FileHash -LiteralPath $installedHelper -Algorithm SHA256).Hash.ToLowerInvariant()
+    Sha256 = Get-Sha256Hex -LiteralPath $installedExecutable
+    DiagnosticHelperSha256 = Get-Sha256Hex -LiteralPath $installedHelper
     CodexDiagnostics = if ($PSBoundParameters.ContainsKey('CodexDiagnostics')) { $CodexDiagnostics } else { 'unchanged' }
 }
 $result

@@ -6,8 +6,9 @@
   added a serialized Windows CI gate for Manager, native diagnostic, privacy,
   and maintenance-filesystem boundaries, and limited the npm package to the
   runtime scripts required by its published commands. PowerShell lifecycle and
-  status scripts now import their required utility module explicitly so clean
-  no-profile invocations do not depend on ambient module state.
+  status scripts now use a bounded .NET SHA-256 helper and explicitly import
+  their remaining utility commands so clean no-profile invocations do not
+  depend on ambient `Get-FileHash` availability or module state.
 - Consolidated tool-mode exposure and MCP annotation classification under one
   focused policy owner, with direct behavioral coverage for minimal, standard,
   full, diagnostic, local-write, handoff-write, and open-world cases.
