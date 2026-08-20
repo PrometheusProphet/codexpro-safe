@@ -251,14 +251,14 @@ namespace CodexProSafeManager
 
         private static List<string> AccessRuleSignatures(FileSecurity security)
         {
-            List<string> values = new List<string>();
+            HashSet<string> unique = new HashSet<string>(StringComparer.Ordinal);
             AuthorizationRuleCollection rules = security.GetAccessRules(true, true, typeof(SecurityIdentifier));
             foreach (AuthorizationRule authorizationRule in rules)
             {
                 FileSystemAccessRule rule = authorizationRule as FileSystemAccessRule;
                 SecurityIdentifier identity = rule == null ? null : rule.IdentityReference as SecurityIdentifier;
                 if (rule == null || identity == null) return null;
-                values.Add(String.Join("|", new[]
+                unique.Add(String.Join("|", new[]
                 {
                     identity.Value,
                     rule.AccessControlType.ToString(),
@@ -268,6 +268,7 @@ namespace CodexProSafeManager
                     rule.IsInherited ? "inherited" : "explicit"
                 }));
             }
+            List<string> values = new List<string>(unique);
             values.Sort(StringComparer.Ordinal);
             return values;
         }
