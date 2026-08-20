@@ -30,4 +30,26 @@ jobs:
         run: npm run smoke
 
       - name: Check Package Contents
-        run: npm pack --dry-run
+        run: npm run test:package-contents
+
+  windows-boundaries:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test Windows Boundaries
+        run: npm run test:windows-boundaries

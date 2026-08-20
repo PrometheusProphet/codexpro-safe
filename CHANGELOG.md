@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- Refreshed the MCP SDK and path-matching dependency tree to patched versions,
+  added a serialized Windows CI gate for Manager, native diagnostic, privacy,
+  and maintenance-filesystem boundaries, and limited the npm package to the
+  runtime scripts required by its published commands. PowerShell lifecycle and
+  status scripts now import their required utility module explicitly so clean
+  no-profile invocations do not depend on ambient module state.
+- Consolidated tool-mode exposure and MCP annotation classification under one
+  focused policy owner, with direct behavioral coverage for minimal, standard,
+  full, diagnostic, local-write, handoff-write, and open-world cases.
+- Consolidated agent handoff plan construction, bounded append behavior,
+  command hints, persistence, and execution-event logging under one focused
+  operations owner while retaining MCP schemas and response formatting in the
+  server registration layer.
+- Consolidated local `execute-handoff` and `watch-handoff` command construction,
+  process capture, output redaction, result persistence, duplicate-plan state,
+  and watcher lifecycle under one CLI runtime owner. Shared terminal rendering
+  now has a small reusable owner, while the main launcher retains argument
+  parsing, workspace-root resolution, routing, tunnels, and connector startup.
+- Consolidated saved-profile identity, secure persistence, option precedence,
+  token masking, listing, reuse selection, and settings display/save behavior
+  under one profile owner. Interactive onboarding questions and settings action
+  routing remain in the main launcher because they share the setup workflow.
 - Corrected the source-only Windows `codexpro-maintenance-fs-v1` launch trust
   boundary. The TypeScript client now bootstraps the separate
   `codexpro-maintenance-fs-launcher-v1` trusted-caller contract instead of

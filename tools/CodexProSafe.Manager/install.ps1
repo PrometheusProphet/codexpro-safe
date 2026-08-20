@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 $project = Split-Path -Parent $MyInvocation.MyCommand.Path
 $source = Join-Path $project 'bin\CodexProSafe.Manager.exe'
 $helperSource = Join-Path $project 'bin\CodexProSafe.DiagnosticHelper.exe'

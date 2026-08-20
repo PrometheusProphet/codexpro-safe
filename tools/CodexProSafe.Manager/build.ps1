@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 $project = Split-Path -Parent $MyInvocation.MyCommand.Path
 $bin = Join-Path $project 'bin'
 $obj = Join-Path $project 'obj'

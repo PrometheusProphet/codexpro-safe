@@ -10,6 +10,12 @@ npm run build
 npm run smoke
 ```
 
+On Windows, also run the native and Manager boundary gate:
+
+```powershell
+npm run test:windows-boundaries
+```
+
 Run a local connector:
 
 ```bash
@@ -39,6 +45,7 @@ npm run connect -- --root /path/to/test/repo --bash safe --write handoff
 - Do not include local tunnel URLs, auth tokens, `.env` values, or private paths.
 - Run `npm run build`.
 - Run `npm run smoke`.
+- Run `npm run test:windows-boundaries` for Windows or Manager changes.
 - Update `README.md` or `CHANGELOG.md` when behavior changes.
 - Explain security impact for changes touching auth, file access, shell execution, or tunnels.
 

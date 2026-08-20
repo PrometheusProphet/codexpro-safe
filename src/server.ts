@@ -1,11 +1,10 @@
-import fsp from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { CodexProConfig } from "./config.js";
-import { WorkspaceManager, PathGuard, CodexProError, type Workspace } from "./guard.js";
-import { repoTree, readTextFile, writeTextFile, editTextFile, ensureAiBridge, sourceOutline, readSourceLines } from "./fsOps.js";
+import { WorkspaceManager, PathGuard, CodexProError } from "./guard.js";
+import { repoTree, readTextFile, writeTextFile, editTextFile, sourceOutline, readSourceLines } from "./fsOps.js";
 import { searchWorkspace } from "./searchOps.js";
 import { runBash } from "./bashOps.js";
 import { gitDiff, gitLog, gitStatus } from "./gitOps.js";
@@ -19,6 +18,17 @@ import { runtimeBuildInfo } from "./buildInfo.js";
 import { CodexDiagnosticOperations } from "./diagnosticOps.js";
 import { ManagedWindowsDiagnosticBoundary } from "./windowsDiagnosticBoundary.js";
 import { resolveWindowsManagerLaunchProof, type ManagerLaunchProof } from "./windowsManagerLaunchProof.js";
+import { writeAgentHandoff } from "./handoffOps.js";
+import {
+  annotationSummary,
+  BASH_ANNOTATIONS,
+  HANDOFF_WRITE_ANNOTATIONS,
+  LOCAL_WRITE_ANNOTATIONS,
+  READ_ONLY_ANNOTATIONS,
+  SESSION_READ_ANNOTATIONS,
+  shouldRegisterTool,
+  toolExposureForMode
+} from "./toolPolicy.js";
 
 const RUNTIME_BUILD_INFO = runtimeBuildInfo(import.meta.url);
 
@@ -274,136 +284,6 @@ function registerToolCompat(
   throw new Error("Unsupported MCP SDK: McpServer has neither registerTool nor tool.");
 }
 
-const MINIMAL_TOOL_NAMES = [
-  "server_config",
-  "codexpro_self_test",
-  "open_current_workspace",
-  "open_workspace",
-  "source_outline",
-  "read_source_lines",
-  "show_changes"
-] as const;
-
-const STANDARD_TOOL_NAMES = [
-  ...MINIMAL_TOOL_NAMES,
-  "tree",
-  "search",
-  "load_skill",
-  "read_instructions",
-  "read_handoff",
-  "save_prompt_file",
-  "export_pro_context",
-  "handoff_to_agent"
-] as const;
-
-const FULL_TOOL_NAMES = [
-  "server_config",
-  "codexpro_self_test",
-  "codexpro_inventory",
-  "load_skill",
-  "read_instructions",
-  "list_workspaces",
-  "open_current_workspace",
-  "open_workspace",
-  "workspace_snapshot",
-  "tree",
-  "search",
-  "source_outline",
-  "read_source_lines",
-  "read",
-  "write",
-  "edit",
-  "bash",
-  "git_status",
-  "git_diff",
-  "show_changes",
-  "read_handoff",
-  "codex_context",
-  "save_prompt_file",
-  "export_pro_context",
-  "handoff_to_agent",
-  "handoff_to_codex"
-] as const;
-
-const ADVANCED_STANDARD_TOOL_NAMES = ["read", "write", "edit", "bash"] as const;
-const CODEX_DIAGNOSTIC_TOOL_NAMES = ["codex_diagnostic_inventory", "codex_diagnostic_config_summary", "codex_diagnostic_sqlite_metadata"] as const;
-
-interface HiddenTool {
-  name: string;
-  reason: string;
-}
-
-interface ToolExposure {
-  effectiveTools: string[];
-  hiddenTools: HiddenTool[];
-}
-
-function toolNamesForMode(config: CodexProConfig): string[] {
-  return toolExposureForMode(config).effectiveTools;
-}
-
-function uniqueToolNames(names: readonly string[]): string[] {
-  return [...new Set(names)];
-}
-
-function toolExposureForMode(config: CodexProConfig): ToolExposure {
-  if (config.toolMode === "full") {
-    const effectiveTools = config.codexDiagnosticReadMode === "read"
-      ? uniqueToolNames([...FULL_TOOL_NAMES, ...CODEX_DIAGNOSTIC_TOOL_NAMES])
-      : uniqueToolNames(FULL_TOOL_NAMES);
-    return { effectiveTools, hiddenTools: [] };
-  }
-
-  const base = config.toolMode === "minimal" ? [...MINIMAL_TOOL_NAMES] : [...STANDARD_TOOL_NAMES];
-  const effective = new Set<string>(base);
-  const hiddenTools: HiddenTool[] = [];
-
-  hiddenTools.push({
-    name: "read",
-    reason: "hidden in minimal/standard modes because source_outline and read_source_lines are the safer bounded source-inspection path"
-  });
-
-  if (config.bashMode === "off") {
-    hiddenTools.push({ name: "bash", reason: "hidden because bashMode=off" });
-  } else {
-    effective.add("bash");
-  }
-
-  if (config.writeMode === "workspace") {
-    effective.add("write");
-    effective.add("edit");
-  } else {
-    hiddenTools.push({
-      name: "write",
-      reason: `hidden because writeMode=${config.writeMode}; use save_prompt_file, handoff_to_agent, or export_pro_context`
-    });
-    hiddenTools.push({
-      name: "edit",
-      reason: `hidden because writeMode=${config.writeMode}; use save_prompt_file, handoff_to_agent, or export_pro_context`
-    });
-  }
-
-  for (const name of ADVANCED_STANDARD_TOOL_NAMES) {
-    if (!effective.has(name) && !hiddenTools.some((item) => item.name === name)) {
-      hiddenTools.push({ name, reason: "hidden by current tool mode" });
-    }
-  }
-
-  if (config.codexDiagnosticReadMode === "read") {
-    for (const name of CODEX_DIAGNOSTIC_TOOL_NAMES) effective.add(name);
-  }
-
-  return {
-    effectiveTools: uniqueToolNames([...effective]),
-    hiddenTools
-  };
-}
-
-function shouldRegisterTool(config: CodexProConfig, name: string): boolean {
-  if (config.toolMode === "full") return true;
-  return toolExposureForMode(config).effectiveTools.includes(name);
-}
-
 function registerCodexTool(
   config: CodexProConfig,
   server: McpServer,
@@ -486,210 +366,9 @@ function changedStatusLines(status: string): string[] {
     .filter((line) => line && !line.startsWith("##"));
 }
 
-function jsonlEvent(event: string, data: Record<string, unknown>): string {
-  return JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + "\n";
-}
-
 function cleanOneLine(value: unknown, fallback: string, maxLength = 120): string {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   return (text || fallback).slice(0, maxLength);
-}
-
-function normalizeAgentId(value: unknown): string {
-  const agent = cleanOneLine(value, "custom", 64).toLowerCase();
-  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(agent)) {
-    throw new CodexProError("agent must use only lowercase letters, numbers, dots, underscores, or hyphens.");
-  }
-  return agent;
-}
-
-function displayAgentName(agent: string, agentName?: unknown): string {
-  const explicit = cleanOneLine(agentName, "", 80);
-  if (explicit) return explicit;
-  if (agent === "codex") return "Codex";
-  if (agent === "opencode") return "OpenCode";
-  if (agent === "pi") return "Pi";
-  return agent;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-function agentCommandHint(agent: string, planPath: string, model?: string): string {
-  const modelArg = model ? ` --model ${shellQuote(model)}` : " --model '<provider/model>'";
-  const quotedPlanPath = shellQuote(planPath);
-  if (agent === "opencode") return `opencode run${modelArg} "$(cat ${quotedPlanPath})"`;
-  if (agent === "pi") return `pi run${modelArg} "$(cat ${quotedPlanPath})"`;
-  if (agent === "codex") return `Read ${planPath} and execute it in small, reviewable steps.`;
-  return `Run your local implementation agent manually with ${planPath} as the task input.`;
-}
-
-async function readRawTextFileBounded(config: CodexProConfig, guard: PathGuard, workspace: Workspace, filePath: string): Promise<string> {
-  const resolved = guard.resolve(workspace, filePath);
-  await guard.assertTextFile(resolved.absPath, config.maxReadBytes);
-  return fsp.readFile(resolved.absPath, "utf8");
-}
-
-function buildAgentPlanBody(options: {
-  title: string;
-  plan: string;
-  workspace: Workspace;
-  agent: string;
-  agentName: string;
-  model?: string;
-  statusPath: string;
-  diffPath: string;
-  executionLogPath: string;
-}): string {
-  const modelLine = options.model ? `Model: ${options.model}\n` : "";
-  return `# ${options.title}
-
-Updated: ${new Date().toISOString()}
-Workspace: ${options.workspace.root}
-Target agent: ${options.agentName} (${options.agent})
-${modelLine}
-## Plan
-
-${options.plan.trim()}
-
-## Implementation contract
-
-- Work from this plan in small, reviewable steps.
-- Keep edits scoped to the requested task and existing project conventions.
-- Run focused verification before handing work back.
-- Update ${options.statusPath} with files touched, checks run, results, blockers, and review notes.
-- Save the final review diff to ${options.diffPath} when practical.
-- Append notable execution events to ${options.executionLogPath} when the implementation agent supports logging.
-`;
-}
-
-async function writeAgentHandoff(
-  config: CodexProConfig,
-  guard: PathGuard,
-  workspace: Workspace,
-  options: {
-    agent: string;
-    agentName?: string;
-    model?: string;
-    title: string;
-    plan: string;
-    append: boolean;
-    eventName: string;
-  }
-): Promise<{
-  agent: string;
-  agentName: string;
-  model?: string;
-  title: string;
-  planPath: string;
-  statusPath: string;
-  diffPath: string;
-  logPath: string;
-  executionLogPath: string;
-  prompt: string;
-  writeResult: Awaited<ReturnType<typeof writeTextFile>>;
-}> {
-  await ensureAiBridge(config, guard, workspace);
-  const agent = normalizeAgentId(options.agent);
-  const agentName = displayAgentName(agent, options.agentName);
-  const model = options.model ? cleanOneLine(options.model, "", 120) : undefined;
-  const plan = String(options.plan ?? "").trim();
-  if (!plan) throw new CodexProError("plan must not be empty.");
-  const planPath = `${config.contextDir}/current-plan.md`;
-  const statusPath = `${config.contextDir}/agent-status.md`;
-  const legacyCodexStatusPath = `${config.contextDir}/codex-status.md`;
-  const diffPath = `${config.contextDir}/implementation-diff.patch`;
-  const logPath = `${config.contextDir}/session-log.jsonl`;
-  const executionLogPath = `${config.contextDir}/execution-log.jsonl`;
-  const body = buildAgentPlanBody({
-    title: options.title,
-    plan,
-    workspace,
-    agent,
-    agentName,
-    model,
-    statusPath,
-    diffPath,
-    executionLogPath
-  });
-
-  let content = body;
-  if (options.append) {
-    const raw = await readRawTextFileBounded(config, guard, workspace, planPath);
-    content = `${raw.trimEnd()}\n\n---\n\n${body}`;
-  }
-
-  const writeResult = await writeTextFile(config, guard, workspace, planPath, content, { createDirs: true, overwrite: true });
-  const event = {
-    agent,
-    agent_name: agentName,
-    model,
-    title: options.title,
-    plan_path: planPath,
-    status_path: statusPath,
-    diff_path: diffPath
-  };
-  const logResolved = guard.resolve(workspace, logPath, { forWrite: true });
-  const executionLogResolved = guard.resolve(workspace, executionLogPath, { forWrite: true });
-  await fsp.appendFile(logResolved.absPath, jsonlEvent(options.eventName, event), "utf8");
-  await fsp.appendFile(executionLogResolved.absPath, jsonlEvent(options.eventName, event), "utf8");
-
-  const promptLines = [
-    `Read ${planPath} and execute it in small, reviewable steps.`,
-    `After each meaningful change, update ${statusPath} with files touched, checks run, results, blockers, and the next review focus.`,
-    `Before review, write the final diff to ${diffPath} when practical.`,
-    agentCommandHint(agent, planPath, model)
-  ];
-  if (agent === "codex") {
-    promptLines.splice(2, 0, `For legacy Codex handoffs, mirror key status notes to ${legacyCodexStatusPath} if your workflow expects that file.`);
-  }
-  const prompt = promptLines.join("\n");
-
-  return {
-    agent,
-    agentName,
-    model,
-    title: options.title,
-    planPath,
-    statusPath,
-    diffPath,
-    logPath,
-    executionLogPath,
-    prompt,
-    writeResult
-  };
-}
-
-const READ_ONLY_ANNOTATIONS = { readOnlyHint: true, openWorldHint: false, destructiveHint: false };
-const SESSION_READ_ANNOTATIONS = { readOnlyHint: true, openWorldHint: false, destructiveHint: false, idempotentHint: false };
-const LOCAL_WRITE_ANNOTATIONS = { readOnlyHint: false, openWorldHint: false, destructiveHint: true, idempotentHint: false };
-const BASH_ANNOTATIONS = { readOnlyHint: false, openWorldHint: true, destructiveHint: true, idempotentHint: false };
-const HANDOFF_WRITE_ANNOTATIONS = { readOnlyHint: false, openWorldHint: false, destructiveHint: false, idempotentHint: false };
-
-function annotationsForTool(name: string): Record<string, boolean> {
-  if (name === "bash") return BASH_ANNOTATIONS;
-  if (name === "write" || name === "edit") return LOCAL_WRITE_ANNOTATIONS;
-  if (name === "save_prompt_file" || name === "export_pro_context" || name === "handoff_to_agent" || name === "handoff_to_codex" || name === "codexpro_self_test") {
-    return HANDOFF_WRITE_ANNOTATIONS;
-  }
-  if (name === "open_current_workspace" || name === "open_workspace") return SESSION_READ_ANNOTATIONS;
-  return READ_ONLY_ANNOTATIONS;
-}
-
-function annotationSummary(toolNames: string[]): Record<string, unknown> {
-  const counts = { read_only: 0, local_write: 0, handoff_write: 0, open_world: 0, destructive: 0 };
-  const byTool: Record<string, Record<string, boolean>> = {};
-  for (const name of toolNames) {
-    const annotations = annotationsForTool(name);
-    byTool[name] = annotations;
-    if (annotations.readOnlyHint) counts.read_only += 1;
-    else if (annotations.destructiveHint) counts.local_write += 1;
-    else counts.handoff_write += 1;
-    if (annotations.openWorldHint) counts.open_world += 1;
-    if (annotations.destructiveHint) counts.destructive += 1;
-  }
-  return { counts, by_tool: byTool };
 }
 
 const workspaceManagers = new Map<string, WorkspaceManager>();

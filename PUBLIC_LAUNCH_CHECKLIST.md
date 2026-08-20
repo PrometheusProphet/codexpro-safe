@@ -24,6 +24,12 @@ npm pack --dry-run
 codexpro-safe doctor --tunnel none
 ```
 
+On Windows, also run the serialized native and Manager boundary gate:
+
+```powershell
+npm run test:windows-boundaries
+```
+
 The tarball must not include:
 
 ```text
