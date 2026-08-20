@@ -209,7 +209,9 @@ namespace CodexProSafeManager
                         File.SetAccessControl(settingsPath, existingSecurity);
                         actualSecurity = File.GetAccessControl(settingsPath, PreservedSecuritySections);
                         if (!SecurityEquivalent(existingSecurity, actualSecurity))
-                            throw new InvalidOperationException("The encrypted manager settings security descriptor could not be preserved.");
+                            throw new InvalidOperationException(
+                                "The encrypted manager settings security descriptor could not be preserved: " +
+                                SecurityDifference(existingSecurity, actualSecurity) + ".");
                     }
                 }
             }
@@ -224,22 +226,27 @@ namespace CodexProSafeManager
 
         internal static bool SecurityEquivalent(FileSecurity expected, FileSecurity actual)
         {
-            if (expected == null || actual == null) return false;
+            return SecurityDifference(expected, actual) == "none";
+        }
+
+        internal static string SecurityDifference(FileSecurity expected, FileSecurity actual)
+        {
+            if (expected == null || actual == null) return "missing";
             SecurityIdentifier expectedOwner = expected.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
             SecurityIdentifier actualOwner = actual.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
             SecurityIdentifier expectedGroup = expected.GetGroup(typeof(SecurityIdentifier)) as SecurityIdentifier;
             SecurityIdentifier actualGroup = actual.GetGroup(typeof(SecurityIdentifier)) as SecurityIdentifier;
-            if (!Object.Equals(expectedOwner, actualOwner) || !Object.Equals(expectedGroup, actualGroup) ||
-                expected.AreAccessRulesProtected != actual.AreAccessRulesProtected)
-                return false;
+            if (!Object.Equals(expectedOwner, actualOwner)) return "owner";
+            if (!Object.Equals(expectedGroup, actualGroup)) return "group";
+            if (expected.AreAccessRulesProtected != actual.AreAccessRulesProtected) return "protection";
 
             List<string> expectedRules = AccessRuleSignatures(expected);
             List<string> actualRules = AccessRuleSignatures(actual);
-            if (expectedRules == null || actualRules == null) return false;
-            if (expectedRules.Count != actualRules.Count) return false;
+            if (expectedRules == null || actualRules == null) return "invalid-rule";
+            if (expectedRules.Count != actualRules.Count) return "rule-count";
             for (int index = 0; index < expectedRules.Count; index++)
-                if (!String.Equals(expectedRules[index], actualRules[index], StringComparison.Ordinal)) return false;
-            return true;
+                if (!String.Equals(expectedRules[index], actualRules[index], StringComparison.Ordinal)) return "rule-set";
+            return "none";
         }
 
         private static List<string> AccessRuleSignatures(FileSecurity security)

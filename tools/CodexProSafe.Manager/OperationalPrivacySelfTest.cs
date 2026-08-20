@@ -330,7 +330,13 @@ namespace CodexProSafeManager
                 if (current is InvalidOperationException)
                 {
                     if (current.Message.IndexOf("diagnostic helper", StringComparison.OrdinalIgnoreCase) >= 0) return "trust";
-                    if (current.Message.IndexOf("security descriptor", StringComparison.OrdinalIgnoreCase) >= 0) return "acl";
+                    if (current.Message.IndexOf("security descriptor", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        foreach (string difference in new[] { "owner", "group", "protection", "invalid-rule", "rule-count", "rule-set", "missing" })
+                            if (current.Message.IndexOf(": " + difference + ".", StringComparison.OrdinalIgnoreCase) >= 0)
+                                return "acl-" + difference;
+                        return "acl";
+                    }
                     if (current.Message.IndexOf("settings are busy", StringComparison.OrdinalIgnoreCase) >= 0) return "busy";
                 }
                 current = current.InnerException;
