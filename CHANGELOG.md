@@ -40,6 +40,10 @@
   tunnel-output suppression, and a custom activity control that withholds
   accumulated log text from UI Automation while retaining accessible status
   and action controls.
+- Made the Manager's post-replacement ACL proof compare the preserved owner,
+  group, DACL protection, and complete access-rule multiset instead of raw
+  security-descriptor bytes, accepting Windows' legal descriptor
+  canonicalization without weakening the fail-closed security postcondition.
 - Closed the direct-connector diagnostic launch bypass. A `read` request now
   remains effectively off until an expiring one-shot Windows pipe handshake
   mutually binds the fixed installed Manager process to a private capability

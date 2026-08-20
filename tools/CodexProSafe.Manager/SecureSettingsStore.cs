@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -175,13 +176,11 @@ namespace CodexProSafeManager
             byte[] encrypted = null;
             string temporaryPath = Path.Combine(settingsDirectory, ".settings-" + Guid.NewGuid().ToString("N") + ".tmp");
             FileSecurity existingSecurity = null;
-            byte[] expectedSecurity = null;
             try
             {
                 if (File.Exists(settingsPath))
                 {
                     existingSecurity = File.GetAccessControl(settingsPath, PreservedSecuritySections);
-                    expectedSecurity = existingSecurity.GetSecurityDescriptorBinaryForm();
                 }
 
                 clear = Encoding.UTF8.GetBytes(json);
@@ -202,14 +201,14 @@ namespace CodexProSafeManager
                 if (File.Exists(settingsPath)) File.Replace(temporaryPath, settingsPath, null, false);
                 else File.Move(temporaryPath, settingsPath);
 
-                if (expectedSecurity != null)
+                if (existingSecurity != null)
                 {
-                    byte[] actualSecurity = File.GetAccessControl(settingsPath, PreservedSecuritySections).GetSecurityDescriptorBinaryForm();
-                    if (!EqualBytes(expectedSecurity, actualSecurity))
+                    FileSecurity actualSecurity = File.GetAccessControl(settingsPath, PreservedSecuritySections);
+                    if (!SecurityEquivalent(existingSecurity, actualSecurity))
                     {
                         File.SetAccessControl(settingsPath, existingSecurity);
-                        actualSecurity = File.GetAccessControl(settingsPath, PreservedSecuritySections).GetSecurityDescriptorBinaryForm();
-                        if (!EqualBytes(expectedSecurity, actualSecurity))
+                        actualSecurity = File.GetAccessControl(settingsPath, PreservedSecuritySections);
+                        if (!SecurityEquivalent(existingSecurity, actualSecurity))
                             throw new InvalidOperationException("The encrypted manager settings security descriptor could not be preserved.");
                     }
                 }
@@ -218,10 +217,52 @@ namespace CodexProSafeManager
             {
                 Clear(clear);
                 Clear(encrypted);
-                Clear(expectedSecurity);
                 try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
                 catch { }
             }
+        }
+
+        internal static bool SecurityEquivalent(FileSecurity expected, FileSecurity actual)
+        {
+            if (expected == null || actual == null) return false;
+            SecurityIdentifier expectedOwner = expected.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+            SecurityIdentifier actualOwner = actual.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+            SecurityIdentifier expectedGroup = expected.GetGroup(typeof(SecurityIdentifier)) as SecurityIdentifier;
+            SecurityIdentifier actualGroup = actual.GetGroup(typeof(SecurityIdentifier)) as SecurityIdentifier;
+            if (!Object.Equals(expectedOwner, actualOwner) || !Object.Equals(expectedGroup, actualGroup) ||
+                expected.AreAccessRulesProtected != actual.AreAccessRulesProtected)
+                return false;
+
+            List<string> expectedRules = AccessRuleSignatures(expected);
+            List<string> actualRules = AccessRuleSignatures(actual);
+            if (expectedRules == null || actualRules == null) return false;
+            if (expectedRules.Count != actualRules.Count) return false;
+            for (int index = 0; index < expectedRules.Count; index++)
+                if (!String.Equals(expectedRules[index], actualRules[index], StringComparison.Ordinal)) return false;
+            return true;
+        }
+
+        private static List<string> AccessRuleSignatures(FileSecurity security)
+        {
+            List<string> values = new List<string>();
+            AuthorizationRuleCollection rules = security.GetAccessRules(true, true, typeof(SecurityIdentifier));
+            foreach (AuthorizationRule authorizationRule in rules)
+            {
+                FileSystemAccessRule rule = authorizationRule as FileSystemAccessRule;
+                SecurityIdentifier identity = rule == null ? null : rule.IdentityReference as SecurityIdentifier;
+                if (rule == null || identity == null) return null;
+                values.Add(String.Join("|", new[]
+                {
+                    identity.Value,
+                    rule.AccessControlType.ToString(),
+                    ((int)rule.FileSystemRights).ToString(),
+                    rule.InheritanceFlags.ToString(),
+                    rule.PropagationFlags.ToString(),
+                    rule.IsInherited ? "inherited" : "explicit"
+                }));
+            }
+            values.Sort(StringComparer.Ordinal);
+            return values;
         }
 
         private static IDisposable AcquireSettingsLock()
@@ -240,14 +281,6 @@ namespace CodexProSafeManager
                 if (!acquired) mutex.Dispose();
                 throw;
             }
-        }
-
-        private static bool EqualBytes(byte[] left, byte[] right)
-        {
-            if (left == null || right == null || left.Length != right.Length) return false;
-            int difference = 0;
-            for (int index = 0; index < left.Length; index++) difference |= left[index] ^ right[index];
-            return difference == 0;
         }
 
         private static void Clear(byte[] value)

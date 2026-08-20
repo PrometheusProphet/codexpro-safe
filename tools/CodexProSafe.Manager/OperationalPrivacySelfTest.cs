@@ -62,8 +62,7 @@ namespace CodexProSafeManager
                 new Dictionary<string, object> { { "FutureSyntheticSetting", futureValue } });
             IDictionary<string, object> beforeValues = SnapshotExceptMode(store.LoadExisting());
             AccessControlSections securitySections = AccessControlSections.Access | AccessControlSections.Owner | AccessControlSections.Group;
-            byte[] beforeSecurity = File.GetAccessControl(store.SettingsPath, securitySections)
-                .GetSecurityDescriptorBinaryForm();
+            FileSecurity beforeSecurity = File.GetAccessControl(store.SettingsPath, securitySections);
 
             StringWriter modeOutput = new StringWriter();
             LastStage = "privacy-mode-update";
@@ -93,10 +92,9 @@ namespace CodexProSafeManager
             LastStage = "privacy-mode-unknown";
             Assert(store.SyntheticPropertyEqualsForSelfTest("FutureSyntheticSetting", futureValue), "unknown setting preserved");
             LastStage = "privacy-mode-acl-read";
-            byte[] afterSecurity = File.GetAccessControl(store.SettingsPath, securitySections)
-                .GetSecurityDescriptorBinaryForm();
+            FileSecurity afterSecurity = File.GetAccessControl(store.SettingsPath, securitySections);
             LastStage = "privacy-mode-acl-compare";
-            Assert(EqualBytes(beforeSecurity, afterSecurity), "settings security descriptor preserved");
+            Assert(SecureSettingsStore.SecurityEquivalent(beforeSecurity, afterSecurity), "settings security descriptor preserved");
             LastStage = "privacy-mode-temp";
             AssertNoTemporaryFiles(settingsRoot);
             LastStage = "privacy-mode-ciphertext";
@@ -350,14 +348,6 @@ namespace CodexProSafeManager
                 if (matched == needle.Length) return true;
             }
             return false;
-        }
-
-        private static bool EqualBytes(byte[] left, byte[] right)
-        {
-            if (left == null || right == null || left.Length != right.Length) return false;
-            int difference = 0;
-            for (int index = 0; index < left.Length; index++) difference |= left[index] ^ right[index];
-            return difference == 0;
         }
 
         private static void Assert(bool condition, string name)
