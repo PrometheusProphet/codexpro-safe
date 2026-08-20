@@ -251,24 +251,28 @@ namespace CodexProSafeManager
 
         private static List<string> AccessRuleSignatures(FileSecurity security)
         {
-            HashSet<string> unique = new HashSet<string>(StringComparer.Ordinal);
+            Dictionary<string, int> effectiveRights = new Dictionary<string, int>(StringComparer.Ordinal);
             AuthorizationRuleCollection rules = security.GetAccessRules(true, true, typeof(SecurityIdentifier));
             foreach (AuthorizationRule authorizationRule in rules)
             {
                 FileSystemAccessRule rule = authorizationRule as FileSystemAccessRule;
                 SecurityIdentifier identity = rule == null ? null : rule.IdentityReference as SecurityIdentifier;
                 if (rule == null || identity == null) return null;
-                unique.Add(String.Join("|", new[]
+                string key = String.Join("|", new[]
                 {
                     identity.Value,
                     rule.AccessControlType.ToString(),
-                    ((int)rule.FileSystemRights).ToString(),
                     rule.InheritanceFlags.ToString(),
                     rule.PropagationFlags.ToString(),
                     rule.IsInherited ? "inherited" : "explicit"
-                }));
+                });
+                int existing;
+                effectiveRights.TryGetValue(key, out existing);
+                effectiveRights[key] = existing | (int)rule.FileSystemRights;
             }
-            List<string> values = new List<string>(unique);
+            List<string> values = new List<string>();
+            foreach (KeyValuePair<string, int> pair in effectiveRights)
+                values.Add(pair.Key + "|" + pair.Value.ToString());
             values.Sort(StringComparer.Ordinal);
             return values;
         }
