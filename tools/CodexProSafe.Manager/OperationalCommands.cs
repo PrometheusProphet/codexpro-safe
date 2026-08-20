@@ -27,7 +27,8 @@ namespace CodexProSafeManager
             SecureSettingsStore store,
             string managerExecutable,
             TextWriter output,
-            IManagerExclusiveLeaseProvider leaseProvider)
+            IManagerExclusiveLeaseProvider leaseProvider,
+            Action<Exception> failureObserver = null)
         {
             if (args == null || args.Length != 2 ||
                 !String.Equals(args[0], "--set-codex-diagnostics", StringComparison.Ordinal) ||
@@ -44,8 +45,9 @@ namespace CodexProSafeManager
                 WriteModeEnvelope(output, "ok", mode, true);
                 return SuccessExitCode;
             }
-            catch
+            catch (Exception exception)
             {
+                if (failureObserver != null) failureObserver(exception);
                 WriteModeEnvelope(output, "unavailable", "unavailable", false);
                 return UpdateUnavailableExitCode;
             }

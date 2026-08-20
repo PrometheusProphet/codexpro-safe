@@ -72,7 +72,8 @@ namespace CodexProSafeManager
                 store,
                 managerExecutable,
                 modeOutput,
-                new SyntheticManagerExclusiveLeaseProvider());
+                new SyntheticManagerExclusiveLeaseProvider(),
+                delegate(Exception exception) { LastStage = "privacy-mode-" + ClassifyModeFailure(exception); });
             LastStage = "privacy-mode-exit";
             Assert(modeExit == OperationalCommands.SuccessExitCode, "mode command success");
             LastStage = "privacy-mode-output";
@@ -315,6 +316,22 @@ namespace CodexProSafeManager
             using (SHA256 algorithm = SHA256.Create())
             using (FileStream stream = File.OpenRead(path))
                 return Convert.ToBase64String(algorithm.ComputeHash(stream));
+        }
+
+        private static string ClassifyModeFailure(Exception exception)
+        {
+            Exception current = exception;
+            while (current != null)
+            {
+                if (current is CryptographicException) return "crypto";
+                if (current is UnauthorizedAccessException) return "access";
+                if (current is IOException) return "io";
+                if (current is InvalidOperationException &&
+                    current.Message.IndexOf("diagnostic helper", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return "trust";
+                current = current.InnerException;
+            }
+            return exception is InvalidOperationException ? "validation" : "unexpected";
         }
 
         private static bool ContainsBytes(byte[] haystack, byte[] needle)
