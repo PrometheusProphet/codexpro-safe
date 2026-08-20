@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../dist/config.js';
 import { createCodexProServer, warmCodexDiagnosticBoundary } from '../dist/server.js';
 import { MANAGER_LAUNCH_PROTOCOL, resolveWindowsManagerLaunchProof } from '../dist/windowsManagerLaunchProof.js';
 
 const PIPE = 'codexpro-safe-diagnostic-0123456789abcdef0123456789abcdef';
-const SYNTHETIC_HELPER = 'C:\\synthetic-manager-package\\CodexProSafe.DiagnosticHelper.exe';
+const SYNTHETIC_HELPER = process.platform === 'win32'
+  ? 'C:\\synthetic-manager-package\\CodexProSafe.DiagnosticHelper.exe'
+  : '/synthetic-manager-package/CodexProSafe.DiagnosticHelper.exe';
 const SYNTHETIC_HASH = 'b'.repeat(64);
 
 function proof(overrides = {}) {
@@ -122,7 +125,7 @@ if (process.argv[2] === '--fixture') {
     const fixture = async (mode) => resolveWindowsManagerLaunchProof({
       pipeName: PIPE,
       commandForTest: process.execPath,
-      argumentsForTest: [new URL(import.meta.url).pathname.slice(1), '--fixture', mode, PIPE],
+      argumentsForTest: [fileURLToPath(import.meta.url), '--fixture', mode, PIPE],
       timeoutMsForTest: 1_000,
       capabilityForTest: 'c'.repeat(64)
     });
