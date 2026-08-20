@@ -325,9 +325,15 @@ namespace CodexProSafeManager
                 if (current is CryptographicException) return "crypto";
                 if (current is UnauthorizedAccessException) return "access";
                 if (current is IOException) return "io";
-                if (current is InvalidOperationException &&
-                    current.Message.IndexOf("diagnostic helper", StringComparison.OrdinalIgnoreCase) >= 0)
-                    return "trust";
+                if (current is System.ComponentModel.Win32Exception) return "win32";
+                if (current is PlatformNotSupportedException || current is NotSupportedException) return "platform";
+                if (current is ArgumentException) return "argument";
+                if (current is InvalidOperationException)
+                {
+                    if (current.Message.IndexOf("diagnostic helper", StringComparison.OrdinalIgnoreCase) >= 0) return "trust";
+                    if (current.Message.IndexOf("security descriptor", StringComparison.OrdinalIgnoreCase) >= 0) return "acl";
+                    if (current.Message.IndexOf("settings are busy", StringComparison.OrdinalIgnoreCase) >= 0) return "busy";
+                }
                 current = current.InnerException;
             }
             return exception is InvalidOperationException ? "validation" : "unexpected";
