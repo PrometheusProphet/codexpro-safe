@@ -42,8 +42,10 @@ namespace CodexProSafeMaintenanceFsLauncher
                     try { WriteFrame(child.Input, bind); }
                     finally { Array.Clear(bind, 0, bind.Length); bootstrap.Clear(); }
                     byte[] bindResponse = ReadChildFrame(child, ResponseLimit);
-                    ValidateBindResponse(bindResponse);
-                    WriteFrame(parentOutput, bindResponse); Array.Clear(bindResponse, 0, bindResponse.Length);
+                    string bindStatus = ValidateBindResponse(bindResponse);
+                    try { WriteFrame(parentOutput, bindResponse); }
+                    finally { Array.Clear(bindResponse, 0, bindResponse.Length); }
+                    if (bindStatus != "ok") { child.Terminate(); return 5; }
 
                     while (true)
                     {
@@ -62,11 +64,13 @@ namespace CodexProSafeMaintenanceFsLauncher
             catch { return 5; }
         }
 
-        private static void ValidateBindResponse(byte[] value)
+        private static string ValidateBindResponse(byte[] value)
         {
             Dictionary<string, object> response = StrictJson.ParseObject(value);
+            string status = response.ContainsKey("status") ? response["status"] as string : null;
             if (!NativeFiles.ExactKeys(response, "protocol", "operation", "status") || !Object.Equals(response["protocol"], PackageLock.MaintenanceProtocol) ||
-                !Object.Equals(response["operation"], "bind_root") || !Object.Equals(response["status"], "ok")) throw new InvalidDataException();
+                !Object.Equals(response["operation"], "bind_root") || (status != "ok" && status != "unsupported" && status != "unavailable")) throw new InvalidDataException();
+            return status;
         }
 
         private static bool IsClose(byte[] value)

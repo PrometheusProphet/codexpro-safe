@@ -11,9 +11,9 @@ import {
 } from '../dist/windowsMaintenanceFsBoundary.js';
 
 if (process.platform === 'win32') {
-    const helper = path.resolve('tools/CodexProSafe.Manager/bin/CodexProSafe.DiagnosticHelper.exe');
-    const launcher = path.resolve('tools/CodexProSafe.Manager/bin/CodexProSafe.MaintenanceFsLauncher.exe');
-    const manifestPath = path.resolve('tools/CodexProSafe.Manager/bin/CodexProSafe.DiagnosticHelper.json');
+    const helper = await fs.realpath(path.resolve('tools/CodexProSafe.Manager/bin/CodexProSafe.DiagnosticHelper.exe'));
+    const launcher = await fs.realpath(path.resolve('tools/CodexProSafe.Manager/bin/CodexProSafe.MaintenanceFsLauncher.exe'));
+    const manifestPath = await fs.realpath(path.resolve('tools/CodexProSafe.Manager/bin/CodexProSafe.DiagnosticHelper.json'));
     const helperHash = createHash('sha256').update(await fs.readFile(helper)).digest('hex');
     const manifestBytes = await fs.readFile(manifestPath);
     const manifestHash = createHash('sha256').update(manifestBytes).digest('hex');
@@ -24,8 +24,8 @@ if (process.platform === 'win32') {
     assert.match(installer, /CodexProSafe\.DiagnosticHelper\.json/);
     assert.equal(installer.includes('CodexProSafe.MaintenanceFsLauncher.exe'), false, 'synthetic launcher must not enter Manager installation');
     assert.throws(() => new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: 'CodexProSafe.MaintenanceFsLauncher.exe', manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: os.tmpdir() }), /path mismatch/);
-    const originalRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-maintenance-fs-test-'));
-    const fixtureDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-maintenance-client-fixture-'));
+    const originalRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-maintenance-fs-test-')));
+    const fixtureDirectory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-maintenance-client-fixture-')));
     let retainedRoot = originalRoot;
     try {
       await fs.mkdir(path.join(originalRoot, 'nested'));
@@ -107,6 +107,15 @@ if (process.platform === 'win32') {
       assert.equal(durationLimited.limitation, 'duration');
       await boundary.close();
       await boundary.close();
+
+      const unsupportedRoot = path.join(originalRoot, 'unsupported-root-junction');
+      await fs.symlink(retainedRoot, unsupportedRoot, 'junction');
+      const unsupportedHelper = await runHelperRequest(helper, framed({ protocol: MAINTENANCE_FS_PROTOCOL, operation: 'bind_root', root: unsupportedRoot }));
+      assert.deepEqual(parseFirstFrame(unsupportedHelper.stdout), { protocol: MAINTENANCE_FS_PROTOCOL, operation: 'bind_root', status: 'unsupported' });
+      assert.equal(unsupportedHelper.stderr.length, 0);
+      const unsupportedBoundary = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: launcher, manifestPath, expectedManifestSha256: manifestHash, expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: unsupportedRoot });
+      await assert.rejects(unsupportedBoundary.ready(), /response mismatch/);
+      await unsupportedBoundary.close().catch(() => undefined);
 
       const wrongFingerprint = new ManagedWindowsMaintenanceFsBoundary({ trustedLauncherPath: launcher, manifestPath, expectedManifestSha256: '0'.repeat(64), expectedMaintenanceProtocol: MAINTENANCE_FS_PROTOCOL, rootPath: originalRoot });
       await assert.rejects(wrongFingerprint.ready(), /exited|unavailable/);
@@ -230,6 +239,13 @@ function framedJson(json) {
   return Buffer.concat([header, body]);
 }
 
+function parseFirstFrame(bytes) {
+  assert.ok(bytes.length >= 5, 'framed response is incomplete');
+  const length = bytes.readUInt32LE(0);
+  assert.equal(bytes.length, length + 4, 'framed response length mismatch');
+  return JSON.parse(bytes.subarray(4).toString('utf8'));
+}
+
 function runRawHelper(helper, bytes) {
   return new Promise((resolve, reject) => {
     const child = spawn(helper, ['--serve-maintenance-fs'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
@@ -240,6 +256,19 @@ function runRawHelper(helper, bytes) {
     child.on('error', reject);
     child.on('exit', (code) => resolve({ code, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) }));
     child.stdin.end(bytes);
+  });
+}
+
+function runHelperRequest(helper, bytes) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(helper, ['--serve-maintenance-fs'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on('data', (chunk) => stdout.push(chunk));
+    child.stderr.on('data', (chunk) => stderr.push(chunk));
+    child.on('error', reject);
+    child.on('exit', (code) => resolve({ code, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) }));
+    child.stdin.write(bytes);
   });
 }
 

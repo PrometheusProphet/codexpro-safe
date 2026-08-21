@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Resolved generated Windows maintenance launcher, manifest, fixture, and root
+  paths to their final filesystem spellings in integration coverage, and made
+  the launcher forward fixed-schema `bind_root` `unsupported`/`unavailable`
+  responses before exiting fail-closed instead of collapsing them into a silent
+  parent-side termination.
 - Made maintenance-helper termination wait for child stdio to close before
   rejecting a pending request, so a valid final framed response cannot lose a
   race against the earlier process `exit` event.
