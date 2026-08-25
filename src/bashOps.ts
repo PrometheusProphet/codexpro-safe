@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
 import type { CodexProConfig } from "./config.js";
 import type { Workspace } from "./guard.js";
 import { CodexProError, PathGuard } from "./guard.js";
 import { redactSensitiveText } from "./redact.js";
 
-export interface BashResult {
+export interface CommandResult {
   command: string;
+  runner: "powershell" | "bash";
   cwd: string;
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -16,6 +16,9 @@ export interface BashResult {
   stderr: string;
   truncated: boolean;
 }
+
+/** @deprecated Compatibility name for integrations that still call this Bash. */
+export type BashResult = CommandResult;
 
 const SAFE_ALLOWED_PREFIXES = [
   "pwd",
@@ -156,7 +159,7 @@ function makeEnv(config: CodexProConfig): NodeJS.ProcessEnv {
   if (config.inheritEnv) {
     return { ...process.env, NO_COLOR: "1", CI: process.env.CI ?? "1" };
   }
-  return {
+  const base: NodeJS.ProcessEnv = {
     PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
     HOME: process.env.HOME ?? "",
     USER: process.env.USER ?? "",
@@ -166,10 +169,34 @@ function makeEnv(config: CodexProConfig): NodeJS.ProcessEnv {
     NO_COLOR: "1",
     CI: "1"
   };
+  if (process.platform === "win32") {
+    // Windows environment names are case-insensitive, but Node preserves case.
+    // Supplying both PATH and Path can make a child inherit the empty/incorrect
+    // one, so retain the platform's conventional spelling exactly once.
+    delete base.PATH;
+    base.Path = process.env.Path ?? process.env.PATH ?? "";
+    base.SystemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows";
+    base.WINDIR = process.env.WINDIR ?? base.SystemRoot;
+    base.COMSPEC = process.env.COMSPEC ?? path.join(base.SystemRoot, "System32", "cmd.exe");
+    base.PATHEXT = process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD";
+    base.TEMP = process.env.TEMP ?? "";
+    base.TMP = process.env.TMP ?? base.TEMP;
+    base.USERPROFILE = process.env.USERPROFILE ?? "";
+    base.HOME = process.env.USERPROFILE ?? base.HOME;
+  }
+  return base;
 }
 
-function bashExecutable(): string {
-  return fs.existsSync("/bin/bash") ? "/bin/bash" : "bash";
+function commandInvocation(command: string): { executable: string; args: string[]; runner: "powershell" | "bash" } {
+  if (process.platform === "win32") {
+    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? "C:\\Windows";
+    return {
+      executable: path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+      args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command],
+      runner: "powershell"
+    };
+  }
+  return { executable: "/bin/bash", args: ["-lc", command], runner: "bash" };
 }
 
 function trimOutput(value: string, maxBytes: number): { value: string; truncated: boolean } {
@@ -179,22 +206,23 @@ function trimOutput(value: string, maxBytes: number): { value: string; truncated
   return { value: `${sliced}\n...[output truncated to ${maxBytes} bytes]`, truncated: true };
 }
 
-export async function runBash(
+export async function runCommand(
   config: CodexProConfig,
   guard: PathGuard,
   workspace: Workspace,
   command: string,
   options: { cwd?: string; timeoutMs?: number } = {}
-): Promise<BashResult> {
+): Promise<CommandResult> {
   if (!command?.trim()) throw new CodexProError("command is required.");
   assertSafeCommand(config, command);
   const cwdResolved = guard.resolve(workspace, options.cwd ?? ".");
   const cwd = cwdResolved.absPath;
   const timeoutMs = Math.max(1_000, Math.min(options.timeoutMs ?? 30_000, 180_000));
   const start = Date.now();
+  const invocation = commandInvocation(command);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(bashExecutable(), ["-lc", command], {
+    const child = spawn(invocation.executable, invocation.args, {
       cwd,
       env: makeEnv(config),
       stdio: ["ignore", "pipe", "pipe"]
@@ -231,6 +259,7 @@ export async function runBash(
       const err = trimOutput(redactSensitiveText(stderr), config.maxOutputBytes);
       resolve({
         command,
+        runner: invocation.runner,
         cwd: path.relative(workspace.root, cwd) || ".",
         exitCode,
         signal,
@@ -241,4 +270,15 @@ export async function runBash(
       });
     });
   });
+}
+
+/** Compatibility alias: the backend is platform-native even when called bash. */
+export function runBash(
+  config: CodexProConfig,
+  guard: PathGuard,
+  workspace: Workspace,
+  command: string,
+  options: { cwd?: string; timeoutMs?: number } = {}
+): Promise<CommandResult> {
+  return runCommand(config, guard, workspace, command, options);
 }

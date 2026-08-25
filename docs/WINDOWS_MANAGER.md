@@ -136,7 +136,10 @@ Open **Settings** and confirm:
 - **ChatGPT access** — **Planning only** is the Safe default (`handoff` writes,
   bash off). **Repository edit** enables repository-scoped writes with bash off.
   **Repository develop** adds Safe bash, which can run repository-owned package
-  scripts. The Manager never exposes `bash full` or raw `workspace` writes.
+  scripts. **Repository full** adds unrestricted platform-native commands while
+  keeping repository-scoped writes. It runs commands with the current Windows
+  user's permissions and is not an OS sandbox. The Manager never exposes raw
+  `workspace` writes.
 - **Node.js** — the `node.exe` used to launch the connector.
 - **Tunnel client** — the downloaded `tunnel-client.exe`.
 - **Tunnel profile** — normally `codexpro-safe-local`.

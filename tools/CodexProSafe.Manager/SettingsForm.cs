@@ -54,11 +54,11 @@ namespace CodexProSafeManager
             apiKey.UseSystemPasswordChar = true;
             AddTextRow(table, 7, "Organization ID", organization);
 
-            AddChoiceRow(table, 8, "ChatGPT access", connectorAccess, new[] { "Planning only", "Repository edit", "Repository develop" });
+            AddChoiceRow(table, 8, "ChatGPT access", connectorAccess, new[] { "Planning only", "Repository edit", "Repository develop", "Repository full" });
             AddChoiceRow(table, 9, "Codex diagnostics", codexDiagnosticRead, new[] { "Off", "Read-only" });
 
             Label accessNote = new Label();
-            accessNote.Text = "Planning only is the Safe default. Repository modes write only when the opened workspace itself is a Git repository root; Safe bash can run repository-owned package scripts. Save does not restart services: choose Restart All to apply launch-setting changes.";
+            accessNote.Text = "Planning only is the Safe default. Repository modes write only when the opened workspace itself is a Git repository root. Repository full runs unrestricted commands with your Windows user permissions and is not an OS sandbox. Save does not restart services: choose Restart All to apply launch-setting changes.";
             accessNote.AutoSize = true;
             accessNote.ForeColor = Color.DimGray;
             accessNote.Margin = new Padding(3, 0, 3, 8);

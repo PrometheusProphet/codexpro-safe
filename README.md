@@ -139,7 +139,7 @@ Standard mode exposes:
 - `export_pro_context` — write `.ai-bridge/pro-context.md` for models that cannot call MCP tools directly.
 - `handoff_to_agent` — write `.ai-bridge/current-plan.md` for Codex, OpenCode, Pi, or a custom local implementation agent without executing local commands.
 
-`read`, `write`, `edit`, and `bash` are compatibility/advanced tools. In minimal and standard mode, CodexPro advertises them only when the current safety modes make them appropriate: `bash` is hidden when bash mode is off, and generic `write`/`edit` are hidden unless repository or workspace writes are explicitly enabled. Full mode exposes the advanced catalog for trusted debugging and compatibility.
+`command` is the primary platform-neutral command tool: it uses Windows PowerShell on Windows and Bash on macOS/Linux. `bash` remains a compatibility alias. In minimal and standard mode, commands are hidden when command mode is off, and generic `write`/`edit` are hidden unless repository or workspace writes are explicitly enabled.
 
 Minimal mode exposes only:
 
@@ -324,6 +324,11 @@ ChatGPT is itself a Git worktree root. You may deliberately allow a trusted
 parent that contains sibling repositories, but opening that parent remains
 read-only for source writes. `workspace` remains the advanced CLI-only option
 for arbitrary workspace-root writes.
+
+For a trusted local session that needs normal developer commands, choose
+`--bash full` explicitly. This enables the platform-native `command` tool
+without the Safe allowlist; it is not an OS sandbox and runs with your user
+permissions. Repository-scoped writes still require an opened Git worktree.
 
 ## ChatGPT app setup
 

@@ -39,6 +39,7 @@ const FULL_TOOL_NAMES = [
   "read",
   "write",
   "edit",
+  "command",
   "bash",
   "git_status",
   "git_diff",
@@ -51,7 +52,7 @@ const FULL_TOOL_NAMES = [
   "handoff_to_codex"
 ] as const;
 
-const ADVANCED_STANDARD_TOOL_NAMES = ["read", "write", "edit", "bash"] as const;
+const ADVANCED_STANDARD_TOOL_NAMES = ["read", "write", "edit", "command", "bash"] as const;
 const CODEX_DIAGNOSTIC_TOOL_NAMES = ["codex_diagnostic_inventory", "codex_diagnostic_config_summary", "codex_diagnostic_sqlite_metadata"] as const;
 
 interface HiddenTool {
@@ -86,8 +87,10 @@ export function toolExposureForMode(config: CodexProConfig): ToolExposure {
   });
 
   if (config.bashMode === "off") {
-    hiddenTools.push({ name: "bash", reason: "hidden because bashMode=off" });
+    hiddenTools.push({ name: "command", reason: "hidden because command mode is off" });
+    hiddenTools.push({ name: "bash", reason: "hidden because command mode is off" });
   } else {
+    effective.add("command");
     effective.add("bash");
   }
 
@@ -133,7 +136,7 @@ export const BASH_ANNOTATIONS = { readOnlyHint: false, openWorldHint: true, dest
 export const HANDOFF_WRITE_ANNOTATIONS = { readOnlyHint: false, openWorldHint: false, destructiveHint: false, idempotentHint: false };
 
 function annotationsForTool(name: string): Record<string, boolean> {
-  if (name === "bash") return BASH_ANNOTATIONS;
+  if (name === "command" || name === "bash") return BASH_ANNOTATIONS;
   if (name === "write" || name === "edit") return LOCAL_WRITE_ANNOTATIONS;
   if (name === "save_prompt_file" || name === "export_pro_context" || name === "handoff_to_agent" || name === "handoff_to_codex" || name === "codexpro_self_test") {
     return HANDOFF_WRITE_ANNOTATIONS;

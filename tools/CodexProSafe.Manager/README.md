@@ -13,6 +13,7 @@ It derives the verified connector launch contract from the saved access profile:
 Planning only: node scripts/codexpro.mjs --root <workspace-root> --allow-root <allowed-root> --tunnel none --mode handoff --bash off --write handoff --codex-diagnostic-read <off|read>
 Repository edit: --mode agent --bash off --write repository
 Repository develop: --mode agent --bash safe --write repository
+Repository full: --mode agent --bash full --write repository (trusted sessions only; unrestricted commands use the current Windows user permissions)
 ```
 
 The tunnel client uses the existing `codexpro-safe-local` profile. Its API key

@@ -114,6 +114,7 @@ namespace CodexProSafeManager
             if (ConnectorAccessMode == "planning") return new ConnectorAccessProfile("handoff", "handoff", "off");
             if (ConnectorAccessMode == "repository-edit") return new ConnectorAccessProfile("agent", "repository", "off");
             if (ConnectorAccessMode == "repository-develop") return new ConnectorAccessProfile("agent", "repository", "safe");
+            if (ConnectorAccessMode == "repository-full") return new ConnectorAccessProfile("agent", "repository", "full");
             throw new InvalidOperationException("Unsupported connector access mode.");
         }
 
@@ -122,6 +123,7 @@ namespace CodexProSafeManager
             if (display == "Planning only") return "planning";
             if (display == "Repository edit") return "repository-edit";
             if (display == "Repository develop") return "repository-develop";
+            if (display == "Repository full") return "repository-full";
             throw new InvalidOperationException("Unsupported connector access mode.");
         }
 
@@ -130,6 +132,7 @@ namespace CodexProSafeManager
             if (value == "planning") return "Planning only";
             if (value == "repository-edit") return "Repository edit";
             if (value == "repository-develop") return "Repository develop";
+            if (value == "repository-full") return "Repository full";
             return "Planning only";
         }
 

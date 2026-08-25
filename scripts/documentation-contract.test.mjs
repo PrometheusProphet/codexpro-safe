@@ -62,6 +62,10 @@ for (const [name, text] of [['README.md', docs['README.md']], ['SECURITY.md', do
   requirePattern(name, text, /allowed parent|allowed root/iu, 'must distinguish allowed-root containment from write authority');
 }
 requirePattern('docs/WINDOWS_MANAGER.md', managerDoc, /Planning only/iu, 'Manager documentation must retain Planning only as the Safe default');
+for (const [name, text] of [['README.md', docs['README.md']], ['SECURITY.md', docs['SECURITY.md']], ['docs/WINDOWS_MANAGER.md', managerDoc]]) {
+  requirePattern(name, text, /Repository full|full mode/iu, 'must describe the explicit full-command boundary');
+  requirePattern(name, text, /not an OS sandbox/iu, 'must not imply full commands are sandboxed');
+}
 if (activeFiles.includes('CHANGELOG.md')) fail('historical CHANGELOG.md must remain outside current-document package/default enforcement');
 
 console.log('✓ public documentation contract passed');

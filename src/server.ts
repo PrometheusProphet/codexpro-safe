@@ -6,7 +6,7 @@ import type { CodexProConfig } from "./config.js";
 import { WorkspaceManager, PathGuard, CodexProError, assertRepositoryWriteAllowed, type Workspace } from "./guard.js";
 import { repoTree, readTextFile, writeTextFile, editTextFile, sourceOutline, readSourceLines } from "./fsOps.js";
 import { searchWorkspace } from "./searchOps.js";
-import { runBash } from "./bashOps.js";
+import { runCommand } from "./bashOps.js";
 import { gitDiff, gitLog, gitStatus } from "./gitOps.js";
 import { readAiBridgeContext, readCodexContext, readWorkspaceInstructions, workspaceSummary } from "./workspaceOps.js";
 import { buildProContext, exportProContext } from "./proContext.js";
@@ -721,10 +721,10 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
           if (config.bashMode === "off") {
             check("bash policy", "warn", "bash disabled");
           } else {
-            const pwd = await runBash(config, guard, workspace, "pwd", { timeoutMs: 10_000 });
+            const pwd = await runCommand(config, guard, workspace, "pwd", { timeoutMs: 10_000 });
             if (config.bashMode === "safe") {
               try {
-                await runBash(config, guard, workspace, "ls $HOME", { timeoutMs: 10_000 });
+                await runCommand(config, guard, workspace, "ls $HOME", { timeoutMs: 10_000 });
                 check("bash policy", "fail", "safe bash allowed environment expansion unexpectedly");
               } catch {
                 check("bash policy", pwd.exitCode === 0 ? "pass" : "warn", "safe bash allowed pwd and blocked environment expansion");
@@ -1502,11 +1502,11 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
   registerCodexTool(
     config,
     server,
-    "bash",
+    "command",
     {
-      title: "Bash",
+      title: "Run Command",
       description:
-        "Run one allowlisted verification command in the workspace, such as tests, build, lint, typecheck, or a project script. Do not use for git status/diff or file inspection; use show_changes, tree, search, and read instead. Do not chain commands with &&, pipes, redirects, or shell file readers.",
+        "Run one command in the workspace through the platform-native runner. Safe mode is allowlisted; full mode is unrestricted and runs with the current user's permissions in a trusted repository.",
       inputSchema: {
         workspace_id: z.string().optional().describe("Workspace id from open_workspace. Omit to use default workspace."),
         command: z.string().describe("Command to run."),
@@ -1516,18 +1516,36 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
       annotations: BASH_ANNOTATIONS,
       _meta: {
         ...toolCardMeta(config),
-        "openai/toolInvocation/invoking": "Running bash command...",
-        "openai/toolInvocation/invoked": "Bash command finished"
+        "openai/toolInvocation/invoking": "Running command...",
+        "openai/toolInvocation/invoked": "Command finished"
       }
     },
     async (args) => {
       const workspace = workspaces.getWorkspace(args.workspace_id);
-      const result = await runBash(config, guard, workspace, String(args.command ?? ""), {
+      const result = await runCommand(config, guard, workspace, String(args.command ?? ""), {
         cwd: args.cwd,
         timeoutMs: args.timeout_ms
       });
-      const text = `# Bash\n\n\`\`\`bash\n$ ${result.command}\n\`\`\`\n\nCWD: ${result.cwd}\nExit: ${result.exitCode}${result.signal ? ` (${result.signal})` : ""}\nDuration: ${result.durationMs} ms\n\n## stdout\n\n\`\`\`text\n${result.stdout || ""}\n\`\`\`\n\n## stderr\n\n\`\`\`text\n${result.stderr || ""}\n\`\`\``;
+      const text = `# Command\n\n\`\`\`text\n$ ${result.command}\n\`\`\`\n\nRunner: ${result.runner}\nCWD: ${result.cwd}\nExit: ${result.exitCode}${result.signal ? ` (${result.signal})` : ""}\nDuration: ${result.durationMs} ms\n\n## stdout\n\n\`\`\`text\n${result.stdout || ""}\n\`\`\`\n\n## stderr\n\n\`\`\`text\n${result.stderr || ""}\n\`\`\``;
       return textResult(text, { workspace_id: workspace.id, root: workspace.root, ...result });
+    }
+  );
+
+  registerCodexTool(
+    config,
+    server,
+    "bash",
+    {
+      title: "Bash (compatibility)",
+      description: "Compatibility alias for command. Uses the same platform-native runner and safety mode.",
+      inputSchema: { workspace_id: z.string().optional(), command: z.string(), cwd: z.string().optional(), timeout_ms: z.number().int().min(1000).max(180000).optional() },
+      annotations: BASH_ANNOTATIONS,
+      _meta: toolCardMeta(config)
+    },
+    async (args) => {
+      const workspace = workspaces.getWorkspace(args.workspace_id);
+      const result = await runCommand(config, guard, workspace, String(args.command ?? ""), { cwd: args.cwd, timeoutMs: args.timeout_ms });
+      return textResult(`# Bash compatibility command\n\nRunner: ${result.runner}\nExit: ${result.exitCode}\n\n${result.stdout}\n${result.stderr}`, { workspace_id: workspace.id, root: workspace.root, ...result });
     }
   );
 

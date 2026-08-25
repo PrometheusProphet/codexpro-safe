@@ -36,6 +36,7 @@ namespace CodexProSafeManager
                 AssertProfile(settings, "planning", "handoff", "handoff", "off");
                 AssertProfile(settings, "repository-edit", "agent", "repository", "off");
                 AssertProfile(settings, "repository-develop", "agent", "repository", "safe");
+                AssertProfile(settings, "repository-full", "agent", "repository", "full");
                 AppSettings legacySettings = AppSettings.CreateDefaults();
                 legacySettings.ConnectorAccessMode = null;
                 legacySettings.ApplyMissingDefaults();
