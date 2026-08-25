@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 export type BashMode = "off" | "safe" | "full";
-export type WriteMode = "off" | "handoff" | "workspace";
+export type WriteMode = "off" | "handoff" | "repository" | "workspace";
 export type ToolMode = "minimal" | "standard" | "full";
 export type ToolCardMode = "off" | "compact";
 export type CodexDiagnosticReadMode = "off" | "read";
@@ -189,7 +189,7 @@ function bashModeFrom(value: string | undefined): BashMode {
 }
 
 function writeModeFrom(value: string | undefined): WriteMode {
-  if (value === "off" || value === "handoff" || value === "workspace") return value;
+  if (value === "off" || value === "handoff" || value === "repository" || value === "workspace") return value;
   return "handoff";
 }
 

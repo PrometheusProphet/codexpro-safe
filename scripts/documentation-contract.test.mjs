@@ -8,6 +8,7 @@ const activeFiles = ['README.md', 'README_ZH.md', 'FAQ.md', 'FAQ_ZH.md', 'PUBLIC
 const ownerFiles = ['SECURITY.md', 'DOMAIN_SETUP.md'];
 const entries = await Promise.all([...activeFiles, ...ownerFiles].map(async (name) => [name, await fs.readFile(name, 'utf8')]));
 const docs = Object.fromEntries(entries);
+const managerDoc = await fs.readFile('docs/WINDOWS_MANAGER.md', 'utf8');
 const packageJson = JSON.parse(await fs.readFile('package.json', 'utf8'));
 const launcher = await fs.readFile('scripts/codexpro.mjs', 'utf8');
 
@@ -56,6 +57,11 @@ for (const name of ['README.md', 'README_ZH.md', 'FAQ.md', 'FAQ_ZH.md', 'PUBLIC_
 }
 requirePattern('SECURITY.md', docs['SECURITY.md'], /normative owner/iu, 'SECURITY.md must remain the detailed normative security owner');
 requirePattern('DOMAIN_SETUP.md', docs['DOMAIN_SETUP.md'], /owns the detailed public-tunnel/iu, 'DOMAIN_SETUP.md must remain the detailed tunnel/domain/profile owner');
+for (const [name, text] of [['README.md', docs['README.md']], ['SECURITY.md', docs['SECURITY.md']], ['docs/WINDOWS_MANAGER.md', managerDoc]]) {
+  requirePattern(name, text, /repository/iu, 'must document repository-scoped write access');
+  requirePattern(name, text, /allowed parent|allowed root/iu, 'must distinguish allowed-root containment from write authority');
+}
+requirePattern('docs/WINDOWS_MANAGER.md', managerDoc, /Planning only/iu, 'Manager documentation must retain Planning only as the Safe default');
 if (activeFiles.includes('CHANGELOG.md')) fail('historical CHANGELOG.md must remain outside current-document package/default enforcement');
 
 console.log('✓ public documentation contract passed');

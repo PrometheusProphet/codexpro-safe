@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import os from "node:os";
@@ -134,6 +135,38 @@ export class WorkspaceManager {
   listWorkspaces(): Workspace[] {
     return [...this.workspaces.values()];
   }
+}
+
+/**
+ * Repository write mode deliberately accepts only the directory Git reports as
+ * the current worktree top level. `git -C` handles both ordinary repositories
+ * and linked worktrees without constructing a shell command or mutating Git
+ * state. A nested directory inside a repository therefore cannot qualify.
+ */
+export function isGitWorktreeRoot(workspace: Workspace): boolean {
+  try {
+    const output = execFileSync(
+      "git",
+      ["-C", workspace.root, "rev-parse", "--is-inside-work-tree", "--show-toplevel"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2_000, windowsHide: true }
+    );
+    const [inside, reportedRoot] = output.trim().split(/\r?\n/);
+    if (inside !== "true" || !reportedRoot) return false;
+    const actualRoot = fs.realpathSync(reportedRoot);
+    return process.platform === "win32"
+      ? actualRoot.toLowerCase() === workspace.root.toLowerCase()
+      : actualRoot === workspace.root;
+  } catch {
+    return false;
+  }
+}
+
+export function assertRepositoryWriteAllowed(workspace: Workspace): void {
+  if (isGitWorktreeRoot(workspace)) return;
+  throw new CodexProError(
+    "Repository write mode requires the opened workspace root itself to be an actual Git worktree root. " +
+      "Open a repository root beneath an allowed parent before using write or edit."
+  );
 }
 
 export class PathGuard {

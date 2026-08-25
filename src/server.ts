@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { CodexProConfig } from "./config.js";
-import { WorkspaceManager, PathGuard, CodexProError } from "./guard.js";
+import { WorkspaceManager, PathGuard, CodexProError, assertRepositoryWriteAllowed, type Workspace } from "./guard.js";
 import { repoTree, readTextFile, writeTextFile, editTextFile, sourceOutline, readSourceLines } from "./fsOps.js";
 import { searchWorkspace } from "./searchOps.js";
 import { runBash } from "./bashOps.js";
@@ -225,8 +225,12 @@ function isContextPath(config: CodexProConfig, relPath: string): boolean {
   return normalized === contextDir || normalized.startsWith(`${contextDir}/`);
 }
 
-function assertWriteToolAllowed(config: CodexProConfig, relPath: string): void {
+export function assertWriteToolAllowed(config: CodexProConfig, workspace: Workspace, relPath: string): void {
   if (config.writeMode === "workspace") return;
+  if (config.writeMode === "repository") {
+    assertRepositoryWriteAllowed(workspace);
+    return;
+  }
   if (config.writeMode === "handoff" && isContextPath(config, relPath)) return;
   if (config.writeMode === "handoff") {
     throw new CodexProError(
@@ -654,7 +658,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
           check("write/edit probe", "warn", "skipped because CODEXPRO_WRITE_MODE=off");
         } else {
           try {
-            assertWriteToolAllowed(config, probePath);
+            assertWriteToolAllowed(config, workspace, probePath);
             const content = [
               "# CodexPro Self Test",
               "",
@@ -1375,7 +1379,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     async (args) => {
       const workspace = workspaces.getWorkspace(args.workspace_id);
       const resolved = guard.resolve(workspace, args.path, { forWrite: true });
-      assertWriteToolAllowed(config, resolved.relPath);
+      assertWriteToolAllowed(config, workspace, resolved.relPath);
       const result = await writeTextFile(config, guard, workspace, args.path, String(args.content ?? ""), {
         createDirs: args.create_dirs !== false,
         overwrite: args.overwrite !== false
@@ -1475,7 +1479,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     async (args) => {
       const workspace = workspaces.getWorkspace(args.workspace_id);
       const resolved = guard.resolve(workspace, args.path, { forWrite: true });
-      assertWriteToolAllowed(config, resolved.relPath);
+      assertWriteToolAllowed(config, workspace, resolved.relPath);
       const result = await editTextFile(config, guard, workspace, args.path, String(args.old_text ?? ""), String(args.new_text ?? ""), {
         replaceAll: parseBool(args.replace_all, false),
         expectedReplacements: args.expected_replacements

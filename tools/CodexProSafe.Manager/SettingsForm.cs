@@ -19,6 +19,7 @@ namespace CodexProSafeManager
         private readonly CheckBox startMinimized = new CheckBox();
         private readonly CheckBox autoStart = new CheckBox();
         private readonly CheckBox restartOnFailure = new CheckBox();
+        private readonly ComboBox connectorAccess = new ComboBox();
         private readonly ComboBox codexDiagnosticRead = new ComboBox();
 
         public AppSettings Result { get; private set; }
@@ -28,7 +29,7 @@ namespace CodexProSafeManager
             original = value;
             Text = "CodexPro-Safe Manager Settings";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(720, 585);
+            ClientSize = new Size(720, 650);
             MinimumSize = new Size(620, 520);
             Font = new Font("Segoe UI", 9F);
             FormBorderStyle = FormBorderStyle.Sizable;
@@ -38,7 +39,7 @@ namespace CodexProSafeManager
             table.Dock = DockStyle.Fill;
             table.Padding = new Padding(18);
             table.ColumnCount = 3;
-            table.RowCount = 14;
+            table.RowCount = 16;
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 86));
@@ -53,14 +54,23 @@ namespace CodexProSafeManager
             apiKey.UseSystemPasswordChar = true;
             AddTextRow(table, 7, "Organization ID", organization);
 
-            AddChoiceRow(table, 8, "Codex diagnostics", codexDiagnosticRead, new[] { "Off", "Read-only" });
+            AddChoiceRow(table, 8, "ChatGPT access", connectorAccess, new[] { "Planning only", "Repository edit", "Repository develop" });
+            AddChoiceRow(table, 9, "Codex diagnostics", codexDiagnosticRead, new[] { "Off", "Read-only" });
+
+            Label accessNote = new Label();
+            accessNote.Text = "Planning only is the Safe default. Repository modes write only when the opened workspace itself is a Git repository root; Safe bash can run repository-owned package scripts. Save does not restart services: choose Restart All to apply launch-setting changes.";
+            accessNote.AutoSize = true;
+            accessNote.ForeColor = Color.DimGray;
+            accessNote.Margin = new Padding(3, 0, 3, 8);
+            table.Controls.Add(accessNote, 1, 10);
+            table.SetColumnSpan(accessNote, 2);
 
             Label secretNote = new Label();
             secretNote.Text = "The key is encrypted for your Windows account with DPAPI. It is never stored in the repository or written to logs.";
             secretNote.AutoSize = true;
             secretNote.ForeColor = Color.DimGray;
             secretNote.Margin = new Padding(3, 0, 3, 8);
-            table.Controls.Add(secretNote, 1, 9);
+            table.Controls.Add(secretNote, 1, 11);
             table.SetColumnSpan(secretNote, 2);
 
             FlowLayoutPanel checks = new FlowLayoutPanel();
@@ -75,7 +85,7 @@ namespace CodexProSafeManager
             checks.Controls.Add(startMinimized);
             checks.Controls.Add(autoStart);
             checks.Controls.Add(restartOnFailure);
-            table.Controls.Add(checks, 1, 10);
+            table.Controls.Add(checks, 1, 12);
             table.SetColumnSpan(checks, 2);
 
             Label takeover = new Label();
@@ -83,7 +93,7 @@ namespace CodexProSafeManager
             takeover.AutoSize = true;
             takeover.ForeColor = Color.DimGray;
             takeover.Margin = new Padding(3, 8, 3, 8);
-            table.Controls.Add(takeover, 1, 11);
+            table.Controls.Add(takeover, 1, 13);
             table.SetColumnSpan(takeover, 2);
 
             FlowLayoutPanel buttons = new FlowLayoutPanel();
@@ -95,7 +105,7 @@ namespace CodexProSafeManager
             save.Click += SaveClicked;
             buttons.Controls.Add(save);
             buttons.Controls.Add(cancel);
-            table.Controls.Add(buttons, 1, 12);
+            table.Controls.Add(buttons, 1, 14);
             table.SetColumnSpan(buttons, 2);
 
             Controls.Add(table);
@@ -110,6 +120,7 @@ namespace CodexProSafeManager
             tunnelProfile.Text = value.TunnelProfile;
             apiKey.Text = value.ControlPlaneApiKey;
             organization.Text = value.OrganizationId;
+            connectorAccess.SelectedItem = AppSettings.ConnectorAccessModeDisplay(value.ConnectorAccessMode);
             codexDiagnosticRead.SelectedItem = value.CodexDiagnosticReadMode == "read" ? "Read-only" : "Off";
             startWithWindows.Checked = value.StartWithWindows;
             startMinimized.Checked = value.StartMinimized;
@@ -194,6 +205,7 @@ namespace CodexProSafeManager
                 StartMinimized = startMinimized.Checked,
                 AutoStartServices = autoStart.Checked,
                 RestartOnFailure = restartOnFailure.Checked,
+                ConnectorAccessMode = AppSettings.ConnectorAccessModeFromDisplay(connectorAccess.SelectedItem as string),
                 CodexDiagnosticReadMode = (codexDiagnosticRead.SelectedItem as string) == "Read-only" ? "read" : "off",
                 DiagnosticHelperPath = original.DiagnosticHelperPath,
                 DiagnosticHelperProtocolVersion = original.DiagnosticHelperProtocolVersion,

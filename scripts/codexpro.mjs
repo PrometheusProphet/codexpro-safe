@@ -66,7 +66,7 @@ Options:
   --allow-home              Allow opening any workspace under your home directory.
   --mode <agent|handoff|pro>
                              Default: handoff.
-                             agent = ChatGPT can use the coding tools; source writes still require --write workspace.
+                             agent = ChatGPT can use the coding tools; source writes still require an explicit --write mode.
                              handoff = ChatGPT writes .ai-bridge plans for a local implementation agent.
                              pro = export context for models that cannot call MCP tools.
   --agent                   Shortcut for --mode agent.
@@ -75,9 +75,11 @@ Options:
   --host <host>             Local bind host. Default: 127.0.0.1.
   --port <port>             Local port. Default: 8787.
   --bash <off|safe|full>    Bash mode. Default: off.
-  --write <off|handoff|workspace>
+  --write <off|handoff|repository|workspace>
                              Write mode. Default: handoff.
                              handoff = write/edit stay in .ai-bridge; save_prompt_file has fixed prompt dirs.
+                             repository = write/edit require the opened workspace itself to be a Git worktree root.
+                             workspace = advanced arbitrary workspace-root writes.
   --tool-mode <minimal|standard|full>
                              Tool surface exposed to ChatGPT. Default: standard.
                              minimal = open/source_outline/read_source_lines/show_changes only.
@@ -1603,7 +1605,7 @@ async function main() {
   const toolCardMode = optionValue(args, profile, 'toolCardMode', ['CODEXPRO_TOOL_CARD_MODE'], DEFAULT_TOOL_CARD_MODE);
   const widgetDomain = optionValue(args, profile, 'widgetDomain', ['CODEXPRO_WIDGET_DOMAIN'], DEFAULT_WIDGET_DOMAIN);
   if (!['off', 'safe', 'full'].includes(bash)) throw new Error('--bash must be off, safe, or full');
-  if (!['off', 'handoff', 'workspace'].includes(write)) throw new Error('--write must be off, handoff, or workspace');
+  if (!['off', 'handoff', 'repository', 'workspace'].includes(write)) throw new Error('--write must be off, handoff, repository, or workspace');
   if (!['minimal', 'standard', 'full'].includes(toolMode)) throw new Error('--tool-mode must be minimal, standard, or full');
   if (!['off', 'read'].includes(codexDiagnosticRead)) throw new Error('--codex-diagnostic-read must be off or read');
   if (!['off', 'compact'].includes(toolCardMode)) throw new Error('--tool-card-mode must be off or compact');

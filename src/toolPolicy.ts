@@ -91,7 +91,7 @@ export function toolExposureForMode(config: CodexProConfig): ToolExposure {
     effective.add("bash");
   }
 
-  if (config.writeMode === "workspace") {
+  if (config.writeMode === "workspace" || config.writeMode === "repository") {
     effective.add("write");
     effective.add("edit");
   } else {

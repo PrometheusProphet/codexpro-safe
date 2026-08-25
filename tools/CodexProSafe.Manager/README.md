@@ -7,10 +7,12 @@ For installation, tunnel, credential, ChatGPT plugin, migration, and
 troubleshooting instructions, see
 [CodexPro-Safe Manager for Windows](../../docs/WINDOWS_MANAGER.md).
 
-It preserves the verified connector launch contract:
+It derives the verified connector launch contract from the saved access profile:
 
 ```text
-node scripts/codexpro.mjs --root <workspace-root> --allow-root <allowed-root> --tunnel none --mode handoff --bash off --write handoff --codex-diagnostic-read <off|read>
+Planning only: node scripts/codexpro.mjs --root <workspace-root> --allow-root <allowed-root> --tunnel none --mode handoff --bash off --write handoff --codex-diagnostic-read <off|read>
+Repository edit: --mode agent --bash off --write repository
+Repository develop: --mode agent --bash safe --write repository
 ```
 
 The tunnel client uses the existing `codexpro-safe-local` profile. Its API key
@@ -67,8 +69,8 @@ Neither mode is installed globally or resolved through `PATH`.
 ## First run
 
 1. Open **Settings**.
-2. Confirm the detected repository, workspace root, Node.js, tunnel client, and
-   `codexpro-safe-local` profile.
+2. Confirm the detected repository, workspace root, allowed root, Node.js, tunnel client, and
+   `codexpro-safe-local` profile. Planning only is the default. For deliberate multi-repository access, set Workspace root to one repository, Allowed root to its trusted parent, and select Repository edit or Repository develop.
 3. Enter the runtime Control Plane API key once and the `org-...` organization
    ID that owns the tunnel.
 4. Save.
@@ -77,7 +79,7 @@ Neither mode is installed globally or resolved through `PATH`.
 
 The takeover is fail-closed. The manager refuses to stop an external process
 unless the listener, executable/profile, command line, workspace root, allowed
-root, tunnel mode, handoff mode, and saved Codex diagnostic mode match.
+root, tunnel mode, selected access profile, and saved Codex diagnostic mode match.
 
 Codex diagnostics default to **Off**. **Read-only** enables only fixed-root,
 metadata-only diagnostics and does not grant generic home/runtime access or any

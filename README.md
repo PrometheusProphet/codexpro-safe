@@ -139,7 +139,7 @@ Standard mode exposes:
 - `export_pro_context` — write `.ai-bridge/pro-context.md` for models that cannot call MCP tools directly.
 - `handoff_to_agent` — write `.ai-bridge/current-plan.md` for Codex, OpenCode, Pi, or a custom local implementation agent without executing local commands.
 
-`read`, `write`, `edit`, and `bash` are compatibility/advanced tools. In minimal and standard mode, CodexPro advertises them only when the current safety modes make them appropriate: `bash` is hidden when bash mode is off, and generic `write`/`edit` are hidden unless workspace writes are explicitly enabled. Full mode exposes the advanced catalog for trusted debugging and compatibility.
+`read`, `write`, `edit`, and `bash` are compatibility/advanced tools. In minimal and standard mode, CodexPro advertises them only when the current safety modes make them appropriate: `bash` is hidden when bash mode is off, and generic `write`/`edit` are hidden unless repository or workspace writes are explicitly enabled. Full mode exposes the advanced catalog for trusted debugging and compatibility.
 
 Minimal mode exposes only:
 
@@ -313,11 +313,17 @@ That is the safe first-run path. It:
 - lets you press `o` to open a local setup/status page
 ```
 
-Explicit source-editing mode for a trusted local repo:
+Recommended source-editing mode for a trusted local repo:
 
 ```bash
-codexpro start --root /absolute/path/to/your/repo --mode agent --write workspace --bash safe
+codexpro start --root /absolute/path/to/your/repo --mode agent --write repository --bash safe
 ```
+
+`repository` exposes `write` and `edit` only when the workspace opened by
+ChatGPT is itself a Git worktree root. You may deliberately allow a trusted
+parent that contains sibling repositories, but opening that parent remains
+read-only for source writes. `workspace` remains the advanced CLI-only option
+for arbitrary workspace-root writes.
 
 ## ChatGPT app setup
 
@@ -797,17 +803,22 @@ Example MCP config:
 
 ## Write modes
 
-`CODEXPRO_WRITE_MODE=handoff` is the default. Use `workspace` only when you want ChatGPT to edit source files directly in a trusted repo.
+`CODEXPRO_WRITE_MODE=handoff` is the default. Use `repository` for direct
+source edits in a trusted Git repository; `workspace` remains the advanced
+option for arbitrary workspace-root writes.
 
 ```text
 off        write/edit tools are disabled; handoff_to_agent and handoff_to_codex still write .ai-bridge/current-plan.md
 handoff    write/edit can only write inside .ai-bridge/
+repository write/edit require the opened workspace itself to be a Git worktree root
 workspace  write/edit can write workspace files, except blocked paths
 ```
 
-The launcher uses `handoff` unless you explicitly pass `--write workspace`.
+The launcher uses `handoff` unless you explicitly pass a write mode. An allowed
+parent root controls which directories can be opened; it does not grant
+repository writes when that parent itself is opened.
 
-`save_prompt_file` is the narrow exception for prompt handoff and coordination. In standard and full tool modes it can save generated prompts only as `.md` or `.txt` files under fixed prompt-only targets: `.ai-bridge/prompts/`, `docs/chatgpt/generated-prompts/`, or `docs/loop/inbox/`. It returns safe metadata and diff stats, not the prompt body or full diff. It does not accept arbitrary directories, does not execute commands, and does not allow generic source editing. Use `workspace` write mode only for trusted direct source edits.
+`save_prompt_file` is the narrow exception for prompt handoff and coordination. In standard and full tool modes it can save generated prompts only as `.md` or `.txt` files under fixed prompt-only targets: `.ai-bridge/prompts/`, `docs/chatgpt/generated-prompts/`, or `docs/loop/inbox/`. It returns safe metadata and diff stats, not the prompt body or full diff. It does not accept arbitrary directories, does not execute commands, and does not allow generic source editing. Use `repository` write mode for trusted direct source edits, or `workspace` only for the advanced arbitrary-root case.
 
 A workspace can require structured prompt-contract validation before any prompt
 write by adding `.codexpro/prompt-save-policy.json`:
@@ -1024,7 +1035,7 @@ Narrate which CodexPro tool you are using before each call.
 
 1. Start CodexPro MCP against your repo with `codexpro start --root /repo`.
 2. Connect the printed endpoint in ChatGPT Developer Mode.
-3. Ask ChatGPT to inspect the repo and write a handoff plan, or explicitly start with `--mode agent --write workspace --bash safe` when direct source edits are intended.
+3. Ask ChatGPT to inspect the repo and write a handoff plan, or explicitly start with `--mode agent --write repository --bash safe` when direct source edits are intended.
 4. If your chosen ChatGPT model cannot call tools, run `codexpro pro-bundle --root /repo --copy`, paste the bundle into that model, then apply its plan with `codexpro pro-apply --root /repo --file plan.md`.
 5. Use `codexpro start --profile` only after reviewing saved settings for the current workspace.
 

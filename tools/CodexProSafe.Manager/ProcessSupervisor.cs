@@ -41,15 +41,16 @@ namespace CodexProSafeManager
         public static string BuildConnectorArguments(AppSettings value)
         {
             string script = Path.Combine(value.RepositoryPath, @"scripts\codexpro.mjs");
+            ConnectorAccessProfile access = value.GetConnectorAccessProfile();
             return String.Join(" ", new[]
             {
                 Quote(script),
                 "--root", Quote(value.WorkspaceRoot),
                 "--allow-root", Quote(value.AllowedRoot),
                 "--tunnel", "none",
-                "--mode", "handoff",
-                "--bash", "off",
-                "--write", "handoff",
+                "--mode", access.Mode,
+                "--bash", access.Bash,
+                "--write", access.Write,
                 "--codex-diagnostic-read", value.CodexDiagnosticReadMode
             });
         }
@@ -406,11 +407,29 @@ namespace CodexProSafeManager
             if (!ContainsArgument(parent.CommandLine, "--root", value.WorkspaceRoot)) return -1;
             if (!ContainsArgument(parent.CommandLine, "--allow-root", value.AllowedRoot)) return -1;
             if (!ContainsArgument(parent.CommandLine, "--tunnel", "none")) return -1;
-            if (!ContainsArgument(parent.CommandLine, "--mode", "handoff")) return -1;
-            if (!ContainsArgument(parent.CommandLine, "--bash", "off")) return -1;
-            if (!ContainsArgument(parent.CommandLine, "--write", "handoff")) return -1;
-            if (!ContainsArgument(parent.CommandLine, "--codex-diagnostic-read", value.CodexDiagnosticReadMode)) return -1;
+            if (!MatchesConfiguredConnectorCommandLine(value, parent.CommandLine)) return -1;
             return parent.ProcessId;
+        }
+
+        internal static bool MatchesConfiguredConnectorCommandLine(AppSettings value, string commandLine)
+        {
+            ConnectorAccessProfile access;
+            try { access = value.GetConnectorAccessProfile(); }
+            catch (InvalidOperationException) { return false; }
+            return HasExactlyOneArgumentValue(commandLine, "--mode", access.Mode) &&
+                HasExactlyOneArgumentValue(commandLine, "--bash", access.Bash) &&
+                HasExactlyOneArgumentValue(commandLine, "--write", access.Write) &&
+                ContainsArgument(commandLine, "--codex-diagnostic-read", value.CodexDiagnosticReadMode);
+        }
+
+        private static bool HasExactlyOneArgumentValue(string commandLine, string name, string expected)
+        {
+            if (String.IsNullOrWhiteSpace(commandLine)) return false;
+            MatchCollection matches = Regex.Matches(
+                commandLine,
+                Regex.Escape(name) + @"\s+(?:""(?<value>[^""]*)""|(?<value>\S+))",
+                RegexOptions.IgnoreCase);
+            return matches.Count == 1 && String.Equals(matches[0].Groups["value"].Value, expected, StringComparison.OrdinalIgnoreCase);
         }
 
         internal static bool ContainsArgument(string commandLine, string name, string value)

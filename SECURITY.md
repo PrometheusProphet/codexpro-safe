@@ -60,7 +60,7 @@ codexpro start \
   --tunnel none
 ```
 
-In the default standard/handoff posture, the advertised source-inspection path is `search` -> `source_outline` -> small `read_source_lines` ranges. Generic `read` is full-mode compatibility, `bash` is hidden when bash mode is off, and generic `write`/`edit` are hidden unless workspace writes are explicitly enabled. Hidden tools still keep their server-side policy checks if called by a full-mode or stale client.
+In the default standard/handoff posture, the advertised source-inspection path is `search` -> `source_outline` -> small `read_source_lines` ranges. Generic `read` is full-mode compatibility, `bash` is hidden when bash mode is off, and generic `write`/`edit` are hidden unless repository or workspace writes are explicitly enabled. Hidden tools still keep their server-side policy checks if called by a full-mode or stale client.
 
 For local false-positive investigation, `CODEXPRO_LOG_TOOL_CALL_DETAILS=1` writes sanitized correlation logs only. These logs use workspace ids or hashes, path hashes/extensions, line ranges, byte counts, redaction counts when available, and mode summaries. They do not log raw file contents, prompt bodies, auth tokens, query strings, private absolute paths, or raw tool arguments. If no local correlation id appears for a blocked call, the host likely blocked the call before invoking the server.
 
@@ -70,7 +70,7 @@ Explicit source-editing mode for a trusted local repo:
 codexpro start \
   --root /path/to/repo \
   --mode agent \
-  --write workspace \
+  --write repository \
   --bash safe \
   --tunnel none
 ```
@@ -100,7 +100,7 @@ codexpro start \
 - In handoff mode, generic `write` and `edit` stay limited to `.ai-bridge/`. `save_prompt_file` may save generated prompts only under `.ai-bridge/prompts/`, `docs/chatgpt/generated-prompts/`, or `docs/loop/inbox/`; it is not a source-editing tool. A workspace may opt into native `product-contract-v1` validation through `.codexpro/prompt-save-policy.json`; required manifests are validated before the write path and no workspace command is executed.
 - Preview local handoff execution with `codexpro execute-handoff --dry-run` before running an unfamiliar adapter or custom command.
 - Keep `execute-handoff` local. Do not wrap it in a remote MCP tool unless you add a stronger approval and sandbox story.
-- Use `--mode agent --write workspace` only with trusted ChatGPT sessions and repo-specific roots.
+- Use `--mode agent --write repository` for trusted ChatGPT sessions. It permits write/edit only when the explicitly opened workspace itself is a Git worktree root. An allowed parent can contain trusted sibling repositories but remains non-writable when opened directly. Use `--write workspace` only as the advanced CLI option for deliberate arbitrary workspace-root writes.
 - Use `--bash safe` or `--bash full` only for trusted local repos. Package-manager scripts can execute repository code; safe mode is not a sandbox.
 - Prefer a repo-specific `--root` instead of `--allow-home`.
 - Saved profiles are not loaded by default during `codexpro start`; pass `--profile` only after reviewing the saved workspace settings.

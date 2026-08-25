@@ -131,8 +131,12 @@ callability.
 Open **Settings** and confirm:
 
 - **Repository** — the CodexPro-Safe source checkout.
-- **Workspace root** — the folder the connector exposes.
-- **Allowed root** — the broadest folder the connector may access.
+- **Workspace root** — the normal repository root the connector opens first.
+- **Allowed root** — the broadest parent containing directories the connector may open.
+- **ChatGPT access** — **Planning only** is the Safe default (`handoff` writes,
+  bash off). **Repository edit** enables repository-scoped writes with bash off.
+  **Repository develop** adds Safe bash, which can run repository-owned package
+  scripts. The Manager never exposes `bash full` or raw `workspace` writes.
 - **Node.js** — the `node.exe` used to launch the connector.
 - **Tunnel client** — the downloaded `tunnel-client.exe`.
 - **Tunnel profile** — normally `codexpro-safe-local`.
@@ -152,6 +156,15 @@ replace a saved key with dots when the field is left unchanged.
 
 The organization ID must identify the organization that owns the tunnel. It is
 not a project ID, workspace ID, tunnel ID, or API-key tracking ID.
+
+For deliberate multi-repository access, set **Workspace root** to one normal
+Git repository, **Allowed root** to the trusted parent containing its sibling
+repositories, and select **Repository edit** or **Repository develop**. The
+allowed parent is only a containment boundary: if ChatGPT opens that parent,
+it remains readable but repository-scoped `write`/`edit` fail closed. It must
+open a child Git repository root to write. Saving this setting changes no
+running service; choose **Restart All** when you are ready to apply new launch
+settings.
 
 The Manager encrypts its complete settings payload for the current Windows
 account with DPAPI and stores it at:

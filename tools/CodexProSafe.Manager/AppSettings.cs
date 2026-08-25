@@ -3,6 +3,20 @@ using System.IO;
 
 namespace CodexProSafeManager
 {
+    internal sealed class ConnectorAccessProfile
+    {
+        public string Mode { get; private set; }
+        public string Write { get; private set; }
+        public string Bash { get; private set; }
+
+        public ConnectorAccessProfile(string mode, string write, string bash)
+        {
+            Mode = mode;
+            Write = write;
+            Bash = bash;
+        }
+    }
+
     [Serializable]
     internal sealed class AppSettings
     {
@@ -18,6 +32,7 @@ namespace CodexProSafeManager
         public bool StartMinimized { get; set; }
         public bool AutoStartServices { get; set; }
         public bool RestartOnFailure { get; set; }
+        public string ConnectorAccessMode { get; set; }
         public string CodexDiagnosticReadMode { get; set; }
         public string DiagnosticHelperPath { get; set; }
         public string DiagnosticHelperProtocolVersion { get; set; }
@@ -32,8 +47,8 @@ namespace CodexProSafeManager
             return new AppSettings
             {
                 RepositoryPath = repo,
-                WorkspaceRoot = Path.Combine(user, "Projects"),
-                AllowedRoot = Path.Combine(user, "Projects"),
+                WorkspaceRoot = repo,
+                AllowedRoot = repo,
                 NodePath = FindNode(),
                 TunnelClientPath = tunnel,
                 TunnelProfile = "codexpro-safe-local",
@@ -43,6 +58,7 @@ namespace CodexProSafeManager
                 StartMinimized = false,
                 AutoStartServices = false,
                 RestartOnFailure = true,
+                ConnectorAccessMode = "planning",
                 CodexDiagnosticReadMode = "off",
                 DiagnosticHelperPath = String.Empty,
                 DiagnosticHelperProtocolVersion = String.Empty,
@@ -59,6 +75,7 @@ namespace CodexProSafeManager
             if (String.IsNullOrWhiteSpace(NodePath)) NodePath = defaults.NodePath;
             if (String.IsNullOrWhiteSpace(TunnelClientPath)) TunnelClientPath = defaults.TunnelClientPath;
             if (String.IsNullOrWhiteSpace(TunnelProfile)) TunnelProfile = defaults.TunnelProfile;
+            if (String.IsNullOrWhiteSpace(ConnectorAccessMode)) ConnectorAccessMode = "planning";
             if (ControlPlaneApiKey == null) ControlPlaneApiKey = String.Empty;
             if (OrganizationId == null) OrganizationId = String.Empty;
             if (String.IsNullOrWhiteSpace(CodexDiagnosticReadMode)) CodexDiagnosticReadMode = "off";
@@ -77,6 +94,8 @@ namespace CodexProSafeManager
                 return "dist\\http.js is missing. Run npm.cmd run build in the repository.";
             if (!Directory.Exists(WorkspaceRoot)) return "Workspace root was not found at " + WorkspaceRoot;
             if (!Directory.Exists(AllowedRoot)) return "Allowed root was not found at " + AllowedRoot;
+            try { GetConnectorAccessProfile(); }
+            catch (InvalidOperationException) { return "Connector access mode must be Planning only, Repository edit, or Repository develop."; }
             if (CodexDiagnosticReadMode != "off" && CodexDiagnosticReadMode != "read")
                 return "Codex diagnostic read mode must be off or read.";
             if (CodexDiagnosticReadMode == "read")
@@ -88,6 +107,30 @@ namespace CodexProSafeManager
                     return "The diagnostic helper fingerprint is missing. Reinstall the Manager before enabling diagnostics.";
             }
             return null;
+        }
+
+        public ConnectorAccessProfile GetConnectorAccessProfile()
+        {
+            if (ConnectorAccessMode == "planning") return new ConnectorAccessProfile("handoff", "handoff", "off");
+            if (ConnectorAccessMode == "repository-edit") return new ConnectorAccessProfile("agent", "repository", "off");
+            if (ConnectorAccessMode == "repository-develop") return new ConnectorAccessProfile("agent", "repository", "safe");
+            throw new InvalidOperationException("Unsupported connector access mode.");
+        }
+
+        public static string ConnectorAccessModeFromDisplay(string display)
+        {
+            if (display == "Planning only") return "planning";
+            if (display == "Repository edit") return "repository-edit";
+            if (display == "Repository develop") return "repository-develop";
+            throw new InvalidOperationException("Unsupported connector access mode.");
+        }
+
+        public static string ConnectorAccessModeDisplay(string value)
+        {
+            if (value == "planning") return "Planning only";
+            if (value == "repository-edit") return "Repository edit";
+            if (value == "repository-develop") return "Repository develop";
+            return "Planning only";
         }
 
         public string ValidateForTunnel()

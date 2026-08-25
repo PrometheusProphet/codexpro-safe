@@ -14,6 +14,8 @@ namespace CodexProSafeManager
             {
                 AppSettings settings = AppSettings.CreateDefaults();
                 Assert(settings.CodexDiagnosticReadMode == "off", "diagnostic default");
+                Assert(settings.ConnectorAccessMode == "planning", "planning access default");
+                Assert(settings.WorkspaceRoot == settings.RepositoryPath && settings.AllowedRoot == settings.RepositoryPath, "repository root defaults");
                 settings.RepositoryPath = @"C:\repo with spaces\codexpro-safe";
                 settings.WorkspaceRoot = @"C:\Users\test\Projects";
                 settings.AllowedRoot = @"C:\Users\test\Projects";
@@ -23,17 +25,24 @@ namespace CodexProSafeManager
 
                 string connector = ProcessSupervisor.BuildConnectorArguments(settings);
                 Assert(connector.Contains("\"C:\\repo with spaces\\codexpro-safe\\scripts\\codexpro.mjs\""), "connector script quoting");
-                Assert(connector.Contains("--mode handoff"), "handoff mode");
-                Assert(connector.Contains("--bash off"), "bash mode");
-                Assert(connector.Contains("--write handoff"), "write mode");
+                Assert(connector.Contains("--mode handoff"), "planning mode");
+                Assert(connector.Contains("--bash off"), "planning bash");
+                Assert(connector.Contains("--write handoff"), "planning write");
                 Assert(connector.Contains("--codex-diagnostic-read read"), "diagnostic read mode");
                 Assert(ProcessSupervisor.BuildTunnelArguments(settings) == "run --profile \"codexpro-safe-local\"", "tunnel profile");
-                Assert(ProcessSupervisor.ContainsArgument(
-                    "node scripts\\codexpro.mjs --root \"C:\\Users\\test\\Projects\" --allow-root \"C:\\Users\\test\\Projects\" --tunnel none --mode handoff --bash off --write handoff --codex-diagnostic-read read",
-                    "--root",
-                    @"C:\Users\test\Projects"), "takeover root matching");
+                Assert(ProcessSupervisor.ContainsArgument(connector, "--root", @"C:\Users\test\Projects"), "takeover root matching");
                 Assert(ProcessSupervisor.ContainsArgument(connector, "--codex-diagnostic-read", "read"), "takeover diagnostic matching");
                 Assert(!ProcessSupervisor.ContainsArgument(connector, "--codex-diagnostic-read", "off"), "takeover diagnostic mismatch");
+                AssertProfile(settings, "planning", "handoff", "handoff", "off");
+                AssertProfile(settings, "repository-edit", "agent", "repository", "off");
+                AssertProfile(settings, "repository-develop", "agent", "repository", "safe");
+                AppSettings legacySettings = AppSettings.CreateDefaults();
+                legacySettings.ConnectorAccessMode = null;
+                legacySettings.ApplyMissingDefaults();
+                Assert(legacySettings.ConnectorAccessMode == "planning", "legacy access default");
+                settings.ConnectorAccessMode = "invalid";
+                AssertThrows(delegate { settings.GetConnectorAccessProfile(); }, "invalid access rejected");
+                settings.ConnectorAccessMode = "planning";
                 string syntheticPipe = "codexpro-safe-diagnostic-0123456789abcdef0123456789abcdef";
                 string syntheticGate = "codexpro-safe-diagnostic-gate-0123456789abcdef0123456789abcdef";
                 System.Collections.Generic.IDictionary<string, string> helperEnvironment = ProcessSupervisor.BuildConnectorEnvironment(settings, syntheticPipe, syntheticGate);
@@ -121,6 +130,20 @@ namespace CodexProSafeManager
             try { action(); }
             catch (InvalidOperationException) { return; }
             throw new InvalidOperationException("Self-test failed: " + name);
+        }
+
+        private static void AssertProfile(AppSettings settings, string accessMode, string mode, string write, string bash)
+        {
+            settings.ConnectorAccessMode = accessMode;
+            string arguments = ProcessSupervisor.BuildConnectorArguments(settings);
+            Assert(ProcessSupervisor.ContainsArgument(arguments, "--mode", mode), accessMode + " mode");
+            Assert(ProcessSupervisor.ContainsArgument(arguments, "--write", write), accessMode + " write");
+            Assert(ProcessSupervisor.ContainsArgument(arguments, "--bash", bash), accessMode + " bash");
+            Assert(ProcessSupervisor.MatchesConfiguredConnectorCommandLine(settings, arguments), accessMode + " takeover match");
+            string mismatched = arguments.Replace("--bash " + bash, "--bash " + (bash == "safe" ? "off" : "safe"));
+            Assert(!ProcessSupervisor.MatchesConfiguredConnectorCommandLine(settings, mismatched), accessMode + " takeover mismatch");
+            string conflicting = arguments + " --mode " + (mode == "agent" ? "handoff" : "agent");
+            Assert(!ProcessSupervisor.MatchesConfiguredConnectorCommandLine(settings, conflicting), accessMode + " takeover conflicting profile");
         }
 
         private static void CreateJunction(string junction, string target)
