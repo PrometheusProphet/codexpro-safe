@@ -7,6 +7,7 @@ import { WorkspaceManager, PathGuard, CodexProError, assertRepositoryWriteAllowe
 import { repoTree, readTextFile, writeTextFile, editTextFile, sourceOutline, readSourceLines } from "./fsOps.js";
 import { searchWorkspace } from "./searchOps.js";
 import { runCommand } from "./bashOps.js";
+import { COMMAND_STATUS_WAIT_MAX_MS, COMMAND_SYNC_BUDGET_MS, CommandJobRegistry, startCommandJobWithBudget, type CommandJobRecord } from "./commandJobs.js";
 import { gitDiff, gitLog, gitStatus } from "./gitOps.js";
 import { readAiBridgeContext, readCodexContext, readWorkspaceInstructions, workspaceSummary } from "./workspaceOps.js";
 import { buildProContext, exportProContext } from "./proContext.js";
@@ -308,7 +309,7 @@ function serverInstructions(config: CodexProConfig): string {
     "2. Follow the parent and repository instruction bodies returned by the workspace open call before editing files. Use read_instructions again when working below a nested target path.",
     "3. Inspect with tree, search, source_outline, and small read_source_lines ranges. Generic read is advanced/full-mode compatibility.",
     "4. Edit with write/edit only when those tools are advertised. In handoff mode, use save_prompt_file, export_pro_context, or handoff_to_agent.",
-    "5. Use bash only for meaningful verification commands such as npm test, npm run build, lint, typecheck, or an existing project script.",
+    "5. Use command (or the bash compatibility alias) for meaningful verification. Long commands may return a job_id before the tunnel request ceiling; use command_status to retrieve the final result.",
     "6. Keep tool calls minimal. Prefer one targeted search plus show_changes instead of repeated broad bash/git calls.",
     "",
     `Current modes: tool=${config.toolMode}, bash=${config.bashMode}, write=${config.writeMode}, codex_diagnostic_read=${config.codexDiagnosticReadMode}.`
@@ -460,6 +461,60 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
   registerToolCardResource(server, config);
   const diagnosticBoundary = getSharedDiagnosticBoundary(config);
   const diagnostics = config.codexDiagnosticReadMode === "read" ? new CodexDiagnosticOperations({ boundary: diagnosticBoundary }) : undefined;
+  const commandJobs = new CommandJobRegistry();
+
+  function completedCommandToolResult(
+    workspace: Workspace,
+    result: NonNullable<CommandJobRecord["result"]>,
+    options: { title?: string; jobId?: string; status?: "completed" } = {}
+  ): any {
+    const title = options.title ?? "Command";
+    const text = `# ${title}\n\n\`\`\`text\n$ ${result.command}\n\`\`\`\n\nRunner: ${result.runner}\nCWD: ${result.cwd}\nExit: ${result.exitCode}${result.signal ? ` (${result.signal})` : ""}\nDuration: ${result.durationMs} ms\n\n## stdout\n\n\`\`\`text\n${result.stdout || ""}\n\`\`\`\n\n## stderr\n\n\`\`\`text\n${result.stderr || ""}\n\`\`\``;
+    return textResult(text, {
+      workspace_id: workspace.id,
+      root: workspace.root,
+      ...(options.status ? { status: options.status } : {}),
+      ...(options.jobId ? { job_id: options.jobId } : {}),
+      ...result
+    });
+  }
+
+  function runningCommandToolResult(workspace: Workspace, job: CommandJobRecord): any {
+    const elapsedMs = Date.now() - job.startedAt;
+    return textResult(
+      `# Command still running\n\nThe command crossed CodexPro's ${COMMAND_SYNC_BUDGET_MS / 1000}-second synchronous tunnel budget and is continuing locally.\n\nJob: ${job.id}\nElapsed: ${elapsedMs} ms\n\nUse command_status with this job_id to retrieve the final result.`,
+      {
+        workspace_id: workspace.id,
+        root: workspace.root,
+        status: "running",
+        job_id: job.id,
+        command: job.command,
+        elapsedMs,
+        poll_tool: "command_status"
+      }
+    );
+  }
+
+  async function executeCommandTool(workspace: Workspace, args: any, title: string): Promise<any> {
+    const command = String(args.command ?? "");
+    const timeoutMs = limitInt(args.timeout_ms, 30_000, 1_000, 180_000);
+    const run = () => runCommand(config, guard, workspace, command, { cwd: args.cwd, timeoutMs });
+
+    if (timeoutMs <= COMMAND_SYNC_BUDGET_MS) {
+      return completedCommandToolResult(workspace, await run(), { title });
+    }
+
+    const job = await startCommandJobWithBudget(commandJobs, workspace.id, command, run);
+    if (job.state === "completed" && job.result) {
+      commandJobs.delete(job.id);
+      return completedCommandToolResult(workspace, job.result, { title });
+    }
+    if (job.state === "failed") {
+      commandJobs.delete(job.id);
+      throw job.error;
+    }
+    return runningCommandToolResult(workspace, job);
+  }
 
   registerCodexTool(
     config,
@@ -1522,12 +1577,43 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     },
     async (args) => {
       const workspace = workspaces.getWorkspace(args.workspace_id);
-      const result = await runCommand(config, guard, workspace, String(args.command ?? ""), {
-        cwd: args.cwd,
-        timeoutMs: args.timeout_ms
+      return executeCommandTool(workspace, args, "Command");
+    }
+  );
+
+  registerCodexTool(
+    config,
+    server,
+    "command_status",
+    {
+      title: "Command Status",
+      description: "Retrieve a long-running command job that was returned by command or bash. Optionally wait up to 30 seconds for it to settle.",
+      inputSchema: {
+        job_id: z.string().uuid().describe("Command job id returned by command or bash."),
+        wait_ms: z.number().int().min(0).max(COMMAND_STATUS_WAIT_MAX_MS).optional().describe("Optional bounded wait before returning status. Maximum: 30000 ms.")
+      },
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: {
+        ...toolCardMeta(config),
+        "openai/toolInvocation/invoking": "Checking command...",
+        "openai/toolInvocation/invoked": "Command status ready"
+      }
+    },
+    async (args) => {
+      const jobId = String(args.job_id ?? "");
+      const job = commandJobs.get(jobId);
+      if (!job) throw new CodexProError("Unknown or expired command job id.");
+      const workspace = workspaces.getWorkspace(job.workspaceId);
+      const waitMs = limitInt(args.wait_ms, 0, 0, COMMAND_STATUS_WAIT_MAX_MS);
+      await commandJobs.wait(job, waitMs);
+      if (job.state === "running") return runningCommandToolResult(workspace, job);
+      if (job.state === "failed") throw job.error;
+      if (!job.result) throw new CodexProError("Command job completed without a result.");
+      return completedCommandToolResult(workspace, job.result, {
+        title: "Command job result",
+        jobId: job.id,
+        status: "completed"
       });
-      const text = `# Command\n\n\`\`\`text\n$ ${result.command}\n\`\`\`\n\nRunner: ${result.runner}\nCWD: ${result.cwd}\nExit: ${result.exitCode}${result.signal ? ` (${result.signal})` : ""}\nDuration: ${result.durationMs} ms\n\n## stdout\n\n\`\`\`text\n${result.stdout || ""}\n\`\`\`\n\n## stderr\n\n\`\`\`text\n${result.stderr || ""}\n\`\`\``;
-      return textResult(text, { workspace_id: workspace.id, root: workspace.root, ...result });
     }
   );
 
@@ -1544,8 +1630,7 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     },
     async (args) => {
       const workspace = workspaces.getWorkspace(args.workspace_id);
-      const result = await runCommand(config, guard, workspace, String(args.command ?? ""), { cwd: args.cwd, timeoutMs: args.timeout_ms });
-      return textResult(`# Bash compatibility command\n\nRunner: ${result.runner}\nExit: ${result.exitCode}\n\n${result.stdout}\n${result.stderr}`, { workspace_id: workspace.id, root: workspace.root, ...result });
+      return executeCommandTool(workspace, args, "Bash compatibility command");
     }
   );
 

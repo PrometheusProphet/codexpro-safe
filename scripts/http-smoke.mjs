@@ -269,7 +269,7 @@ try {
 
   const headerTools = await listTools(`${baseUrl}/mcp`, token);
   const headerToolNames = toolNames(headerTools);
-  for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'load_skill', 'show_changes', 'codex_context', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {
+  for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'load_skill', 'show_changes', 'command', 'command_status', 'bash', 'codex_context', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {
     if (!headerToolNames.includes(expected)) {
       throw new Error(`bearer MCP tools/list missing ${expected}; got ${headerToolNames.join(', ')}`);
     }
@@ -482,7 +482,7 @@ try {
   }
   const defaultOffTools = await listTools(defaultOffMcpUrl, defaultOffToken);
   const defaultOffToolNames = toolNames(defaultOffTools);
-  for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'load_skill', 'show_changes', 'codex_context', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {
+  for (const expected of ['server_config', 'codexpro_self_test', 'codexpro_inventory', 'open_current_workspace', 'open_workspace', 'workspace_snapshot', 'load_skill', 'show_changes', 'command', 'command_status', 'bash', 'codex_context', 'handoff_to_agent', 'handoff_to_codex', 'export_pro_context']) {
     if (!defaultOffToolNames.includes(expected)) {
       throw new Error(`default-off HTTP tools/list missing ${expected}; got ${defaultOffToolNames.join(', ')}`);
     }

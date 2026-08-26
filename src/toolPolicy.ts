@@ -40,6 +40,7 @@ const FULL_TOOL_NAMES = [
   "write",
   "edit",
   "command",
+  "command_status",
   "bash",
   "git_status",
   "git_diff",
@@ -52,7 +53,7 @@ const FULL_TOOL_NAMES = [
   "handoff_to_codex"
 ] as const;
 
-const ADVANCED_STANDARD_TOOL_NAMES = ["read", "write", "edit", "command", "bash"] as const;
+const ADVANCED_STANDARD_TOOL_NAMES = ["read", "write", "edit", "command", "command_status", "bash"] as const;
 const CODEX_DIAGNOSTIC_TOOL_NAMES = ["codex_diagnostic_inventory", "codex_diagnostic_config_summary", "codex_diagnostic_sqlite_metadata"] as const;
 
 interface HiddenTool {
@@ -88,9 +89,11 @@ export function toolExposureForMode(config: CodexProConfig): ToolExposure {
 
   if (config.bashMode === "off") {
     hiddenTools.push({ name: "command", reason: "hidden because command mode is off" });
+    hiddenTools.push({ name: "command_status", reason: "hidden because command mode is off" });
     hiddenTools.push({ name: "bash", reason: "hidden because command mode is off" });
   } else {
     effective.add("command");
+    effective.add("command_status");
     effective.add("bash");
   }
 

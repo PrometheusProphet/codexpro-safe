@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Prevented long Manager/tunnel command calls from crossing the OpenAI tunnel
+  request ceiling: commands may now detach after a 90-second synchronous budget,
+  continue locally under their original timeout, and expose a bounded read-only
+  `command_status` polling path for final output.
 - Resolved generated Windows maintenance launcher, manifest, fixture, and root
   paths to their final filesystem spellings in integration coverage, and made
   the launcher forward fixed-schema `bind_root` `unsupported`/`unavailable`

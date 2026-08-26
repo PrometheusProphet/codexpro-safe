@@ -23,13 +23,14 @@ test('minimal mode keeps the bounded inspection surface and explains hidden adva
     'read_source_lines',
     'show_changes',
   ]);
-  assert.deepEqual(exposure.hiddenTools.map((tool) => tool.name), ['read', 'command', 'bash', 'write', 'edit']);
+  assert.deepEqual(exposure.hiddenTools.map((tool) => tool.name), ['read', 'command', 'command_status', 'bash', 'write', 'edit']);
 });
 
 test('standard mode adds only advanced tools enabled by their safety modes', () => {
   const exposure = toolExposureForMode(config({ bashMode: 'safe', writeMode: 'workspace' }));
   assert.equal(exposure.effectiveTools.includes('bash'), true);
   assert.equal(exposure.effectiveTools.includes('command'), true);
+  assert.equal(exposure.effectiveTools.includes('command_status'), true);
   assert.equal(exposure.effectiveTools.includes('write'), true);
   assert.equal(exposure.effectiveTools.includes('edit'), true);
   assert.equal(exposure.effectiveTools.includes('read'), false);
@@ -47,7 +48,7 @@ test('diagnostic read mode adds only the fixed diagnostic tools', () => {
 
 test('full mode preserves the complete compatibility catalog', () => {
   const exposure = toolExposureForMode(config({ toolMode: 'full' }));
-  for (const name of ['read', 'write', 'edit', 'command', 'bash', 'git_diff', 'handoff_to_codex']) {
+  for (const name of ['read', 'write', 'edit', 'command', 'command_status', 'bash', 'git_diff', 'handoff_to_codex']) {
     assert.equal(exposure.effectiveTools.includes(name), true, `full mode omitted ${name}`);
   }
   assert.deepEqual(exposure.hiddenTools, []);
@@ -65,5 +66,8 @@ test('annotation summaries preserve read, session, local-write, handoff, and ope
   assert.equal(summary.by_tool.open_workspace.idempotentHint, false);
   assert.equal(summary.by_tool.write.destructiveHint, true);
   assert.equal(summary.by_tool.command.openWorldHint, true);
+  const statusSummary = annotationSummary(['command_status']);
+  assert.equal(statusSummary.by_tool.command_status.readOnlyHint, true);
+  assert.equal(statusSummary.by_tool.command_status.destructiveHint, false);
   assert.equal(summary.by_tool.handoff_to_agent.destructiveHint, false);
 });

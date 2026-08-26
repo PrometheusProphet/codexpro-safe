@@ -139,7 +139,7 @@ Standard mode exposes:
 - `export_pro_context` — write `.ai-bridge/pro-context.md` for models that cannot call MCP tools directly.
 - `handoff_to_agent` — write `.ai-bridge/current-plan.md` for Codex, OpenCode, Pi, or a custom local implementation agent without executing local commands.
 
-`command` is the primary platform-neutral command tool: it uses Windows PowerShell on Windows and Bash on macOS/Linux. `bash` remains a compatibility alias. In minimal and standard mode, commands are hidden when command mode is off, and generic `write`/`edit` are hidden unless repository or workspace writes are explicitly enabled.
+`command` is the primary platform-neutral command tool: it uses Windows PowerShell on Windows and Bash on macOS/Linux. `bash` remains a compatibility alias. Commands with a timeout above 90 seconds run synchronously for up to 90 seconds; if they are still running, the tool returns a running state plus a `job_id` before the tunnel request ceiling. Use the read-only `command_status` tool (optionally with `wait_ms` up to 30000) to retrieve the final ordinary command result. The underlying command still uses its requested timeout, capped at 180 seconds. In minimal and standard mode, `command`, `command_status`, and `bash` are hidden when command mode is off, and generic `write`/`edit` are hidden unless repository or workspace writes are explicitly enabled.
 
 Minimal mode exposes only:
 

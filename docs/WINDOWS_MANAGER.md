@@ -139,7 +139,11 @@ Open **Settings** and confirm:
   scripts. **Repository full** adds unrestricted platform-native commands while
   keeping repository-scoped writes. It runs commands with the current Windows
   user's permissions and is not an OS sandbox. The Manager never exposes raw
-  `workspace` writes.
+  `workspace` writes. Long command requests use a tunnel-safe handoff: after up
+  to 90 seconds the connector may return a `job_id` while the process continues
+  locally under its original timeout (maximum 180 seconds). Use the read-only
+  `command_status` tool to retrieve the result; each optional status wait is
+  bounded to 30 seconds.
 - **Node.js** — the `node.exe` used to launch the connector.
 - **Tunnel client** — the downloaded `tunnel-client.exe`.
 - **Tunnel profile** — normally `codexpro-safe-local`.
