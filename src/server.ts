@@ -378,6 +378,7 @@ function cleanOneLine(value: unknown, fallback: string, maxLength = 120): string
 
 const workspaceManagers = new Map<string, WorkspaceManager>();
 const diagnosticBoundaries = new Map<string, ManagedWindowsDiagnosticBoundary>();
+const commandJobRegistries = new WeakMap<CodexProConfig, CommandJobRegistry>();
 
 function workspaceManagerKey(config: CodexProConfig): string {
   return JSON.stringify({
@@ -451,7 +452,22 @@ export async function warmCodexDiagnosticBoundary(
   }
 }
 
-export function createCodexProServer(config: CodexProConfig): McpServer {
+interface CreateCodexProServerOptions {
+  commandSyncBudgetMs?: number;
+}
+
+function getSharedCommandJobRegistry(config: CodexProConfig): CommandJobRegistry {
+  const existing = commandJobRegistries.get(config);
+  if (existing) return existing;
+  const registry = new CommandJobRegistry();
+  commandJobRegistries.set(config, registry);
+  return registry;
+}
+
+export function createCodexProServer(
+  config: CodexProConfig,
+  options: CreateCodexProServerOptions = {}
+): McpServer {
   const workspaces = getSharedWorkspaceManager(config);
   const guard = new PathGuard(config);
   const server = new McpServer(
@@ -461,7 +477,8 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
   registerToolCardResource(server, config);
   const diagnosticBoundary = getSharedDiagnosticBoundary(config);
   const diagnostics = config.codexDiagnosticReadMode === "read" ? new CodexDiagnosticOperations({ boundary: diagnosticBoundary }) : undefined;
-  const commandJobs = new CommandJobRegistry();
+  const commandJobs = getSharedCommandJobRegistry(config);
+  const commandSyncBudgetMs = options.commandSyncBudgetMs ?? COMMAND_SYNC_BUDGET_MS;
 
   function completedCommandToolResult(
     workspace: Workspace,
@@ -500,11 +517,17 @@ export function createCodexProServer(config: CodexProConfig): McpServer {
     const timeoutMs = limitInt(args.timeout_ms, 30_000, 1_000, 180_000);
     const run = () => runCommand(config, guard, workspace, command, { cwd: args.cwd, timeoutMs });
 
-    if (timeoutMs <= COMMAND_SYNC_BUDGET_MS) {
+    if (timeoutMs <= commandSyncBudgetMs) {
       return completedCommandToolResult(workspace, await run(), { title });
     }
 
-    const job = await startCommandJobWithBudget(commandJobs, workspace.id, command, run);
+    const job = await startCommandJobWithBudget(
+      commandJobs,
+      workspace.id,
+      command,
+      run,
+      commandSyncBudgetMs
+    );
     if (job.state === "completed" && job.result) {
       commandJobs.delete(job.id);
       return completedCommandToolResult(workspace, job.result, { title });
