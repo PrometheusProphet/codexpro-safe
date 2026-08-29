@@ -83,13 +83,17 @@ export class CommandJobRegistry {
 
   async wait(record: CommandJobRecord, waitMs: number): Promise<CommandJobRecord> {
     if (record.state !== "running" || waitMs <= 0) return record;
-    await Promise.race([
-      record.settled,
-      new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, waitMs);
-        timer.unref();
-      })
-    ]);
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        record.settled,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, waitMs);
+        })
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     return record;
   }
 
