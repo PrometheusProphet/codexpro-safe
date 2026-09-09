@@ -9,7 +9,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Connector (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        node:
+          - 20
+          - 24
 
     steps:
       - name: Checkout
@@ -18,7 +28,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install

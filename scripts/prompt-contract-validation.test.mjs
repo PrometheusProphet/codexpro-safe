@@ -173,7 +173,7 @@ test("allows a lightweight Green manifest without structured result schema", () 
 });
 
 test("completes an authoritative hash without mutating the caller manifest", async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "codexpro-prompt-validation-"));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "codexpro-prompt-validation-")));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.mkdir(path.join(root, ".codexpro"), { recursive: true });
   await fs.writeFile(

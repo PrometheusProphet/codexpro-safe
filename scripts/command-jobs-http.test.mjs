@@ -85,7 +85,7 @@ async function connectClient(url) {
 }
 
 test('command_status retrieves a long command job through a distinct Streamable HTTP session', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-command-jobs-http-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'codexpro-command-jobs-http-')));
   const server = await startTestServer(testConfig(root));
   const firstClient = await connectClient(server.url);
   const secondClient = await connectClient(server.url);

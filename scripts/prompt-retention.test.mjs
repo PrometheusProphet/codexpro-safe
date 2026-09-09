@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { PathGuard } from "../dist/guard.js";
 import { savePromptFile } from "../dist/promptFileOps.js";
 
-const root = await mkdtemp(path.join(tmpdir(), "codexpro-prompt-retention-"));
+const root = await realpath(await mkdtemp(path.join(tmpdir(), "codexpro-prompt-retention-")));
 try {
   const promptRoot = path.join(root, ".ai-bridge", "prompts"); await mkdir(promptRoot, { recursive: true });
   for (let index = 0; index < 25; index += 1) {

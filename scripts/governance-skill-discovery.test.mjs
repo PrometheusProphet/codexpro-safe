@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -7,7 +7,7 @@ import { discoverSkillInventory, loadSkill } from "../dist/capabilitiesOps.js";
 import { PathGuard } from "../dist/guard.js";
 import { readWorkspaceInstructions } from "../dist/workspaceOps.js";
 
-const root = await mkdtemp(path.join(tmpdir(), "codexpro-governance-"));
+const root = await realpath(await mkdtemp(path.join(tmpdir(), "codexpro-governance-")));
 try {
   const workspaceRoot = path.join(root, "repo");
   await mkdir(path.join(workspaceRoot, "src"), { recursive: true });

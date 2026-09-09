@@ -258,11 +258,23 @@ function realDir(input) {
 }
 
 function commandExists(command) {
-  const result = spawnSync(process.platform === 'win32' ? 'where' : 'command', process.platform === 'win32' ? [command] : ['-v', command], {
-    shell: process.platform !== 'win32',
-    stdio: 'ignore'
-  });
-  return result.status === 0;
+  if (process.platform === 'win32') {
+    const result = spawnSync('where', [command], { shell: false, stdio: 'ignore' });
+    return result.status === 0;
+  }
+
+  if (!command || command.includes('/') || command.includes('\\') || command.includes('\0')) return false;
+  for (const entry of (process.env.PATH ?? '').split(path.delimiter)) {
+    const directory = entry || process.cwd();
+    const candidate = path.join(directory, command);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      if (fs.statSync(candidate).isFile()) return true;
+    } catch {
+      // Continue searching the remaining PATH entries.
+    }
+  }
+  return false;
 }
 
 function isPathLike(command) {
