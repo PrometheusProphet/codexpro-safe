@@ -12,6 +12,8 @@ final class ManagerModel: ObservableObject {
     @Published var state: ServiceState = .stopped
     @Published var status = "Stopped"
     @Published var launchAtLogin = false
+    @Published var pendingTakeover: ExternalConnectorPlan?
+    @Published var showingTakeoverConfirmation = false
     private var process: Process?
     private var healthTask: Task<Void, Never>?
     private var intentionalStop = false
@@ -47,6 +49,9 @@ final class ManagerModel: ObservableObject {
         do {
             let checked = try settings.validated()
             let token = try KeychainTokenStore.read()
+            if try ExternalConnectorInspector.loopbackListenerIsPresent(port: checked.port) {
+                throw ManagerError.invalid("The configured loopback port is already in use. Use Take Over Existing; mismatched processes will be refused.")
+            }
             settings = checked
             intentionalStop = false
             state = .starting
@@ -118,6 +123,60 @@ final class ManagerModel: ObservableObject {
         Task { try? await Task.sleep(for: .seconds(3)); start() }
     }
 
+    func prepareTakeover() {
+        guard process == nil else { return }
+        Task {
+            do {
+                let checked = try settings.validated()
+                let token = try KeychainTokenStore.read()
+                guard await healthIsReady(checked.localHealthURL, token: token) else {
+                    throw ManagerError.invalid("No authenticated external connector is ready on the configured port.")
+                }
+                let plan = try await Task.detached {
+                    try ExternalConnectorInspector.inspect(settings: checked)
+                }.value
+                pendingTakeover = plan
+                showingTakeoverConfirmation = true
+                status = "Exact external connector verified"
+            } catch {
+                pendingTakeover = nil
+                showingTakeoverConfirmation = false
+                state = .degraded
+                status = error.localizedDescription
+            }
+        }
+    }
+
+    func confirmTakeover() {
+        guard let plan = pendingTakeover else { return }
+        pendingTakeover = nil
+        showingTakeoverConfirmation = false
+        state = .stopping
+        status = "Stopping exact verified external connector"
+        Task {
+            do {
+                let checked = try settings.validated()
+                let token = try KeychainTokenStore.read()
+                try await ExternalConnectorInspector.stop(plan: plan, settings: checked)
+                guard await waitForHealthToStop(checked.localHealthURL, token: token) else {
+                    throw ManagerError.invalid("External endpoint remained available after the verified process exited.")
+                }
+                state = .stopped
+                status = "External connector stopped; starting Manager ownership"
+                start()
+            } catch {
+                state = .degraded
+                status = error.localizedDescription
+            }
+        }
+    }
+
+    func cancelTakeover() {
+        pendingTakeover = nil
+        showingTakeoverConfirmation = false
+        status = "Takeover cancelled; external connector was not changed"
+    }
+
     func saveToken(_ token: String) {
         do { try KeychainTokenStore.save(token); status = "Token saved in Keychain" }
         catch { status = "Keychain error: \(error.localizedDescription)" }
@@ -163,6 +222,22 @@ final class ManagerModel: ObservableObject {
         }
         state = .degraded
         status = "Connector health verification timed out"
+    }
+
+    private func healthIsReady(_ url: URL, token: String) async -> Bool {
+        var request = URLRequest(url: url, timeoutInterval: 1)
+        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else { return false }
+        return http.statusCode == 200
+    }
+
+    private func waitForHealthToStop(_ url: URL, token: String) async -> Bool {
+        for _ in 0..<32 {
+            if !(await healthIsReady(url, token: token)) { return true }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        return false
     }
 
     private func append(_ text: String) {
@@ -228,6 +303,20 @@ struct ManagerMenu: View {
         Button("Start All") { model.start() }.disabled(model.state == .starting || model.state == .ready)
         Button("Restart All") { model.restart() }.disabled(model.state == .stopped)
         Button("Stop All") { model.stop() }.disabled(model.state == .stopped)
+        Button("Take Over Existing…") { model.prepareTakeover() }
+            .disabled(model.state == .starting || model.state == .ready || model.state == .stopping)
+            .confirmationDialog(
+                "Take control of existing CodexPro-Safe connector?",
+                isPresented: $model.showingTakeoverConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Stop Verified Process and Restart", role: .destructive) { model.confirmTakeover() }
+                Button("Cancel", role: .cancel) { model.cancelTakeover() }
+            } message: {
+                if let plan = model.pendingTakeover {
+                    Text("The listener PID \(plan.listener.pid) and owner PID \(plan.owner.pid) exactly match the saved executable, roots, access profile, arguments, and isolated process group. Identity is checked again before any signal is sent.")
+                }
+            }
         SettingsLink { Text("Settings…") }
         Divider()
         Button("Quit") { model.quit() }

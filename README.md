@@ -376,9 +376,11 @@ process-group lifecycle ownership, authenticated loopback health checks, and a
 real MCP tool-call smoke gate. Phase 3 also provides reproducible universal app,
 ZIP, and installer packaging with hardened-runtime and Launch at Login proof.
 Development artifacts are ad-hoc signed by default; public distribution still
-requires Developer ID signing and Apple notarization. Its native diagnostic
-profile remains off until a separate macOS trust boundary is implemented and
-reviewed.
+requires Developer ID signing and Apple notarization. Phase 4 adds confirmed,
+fail-closed takeover of an exact matching local connector with process identity
+revalidation, mismatch preservation, endpoint shutdown proof, and Manager-owned
+relaunch. Its native diagnostic profile remains off until a separate macOS
+trust boundary is implemented and reviewed.
 
 If `cloudflared` is missing, install it yourself, pass `--cloudflared <path>`, or explicitly run:
 

@@ -86,6 +86,7 @@
     "manager:mac:package": "bash scripts/package-macos-manager.sh",
     "manager:mac:verify-bundle": "bash scripts/verify-macos-manager-bundle.sh",
     "manager:mac:test-login-item": "bash scripts/macos-manager-login-item-smoke.sh",
+    "manager:mac:test-takeover": "node scripts/macos-manager-takeover-smoke.mjs",
     "doctor": "node scripts/codexpro.mjs doctor",
     "connect": "node scripts/codexpro.mjs --tunnel none --mode handoff --bash off --write handoff",
     "connect:setup": "node scripts/codexpro.mjs setup",

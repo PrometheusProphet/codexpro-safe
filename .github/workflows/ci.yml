@@ -90,6 +90,9 @@ jobs:
       - name: Verify macOS Manager lifecycle
         run: npm run manager:mac:smoke
 
+      - name: Verify exact external-process takeover
+        run: npm run manager:mac:test-takeover
+
       - name: Package universal macOS Manager
         run: npm run manager:mac:package
 

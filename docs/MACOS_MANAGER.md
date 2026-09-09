@@ -4,7 +4,7 @@ The macOS Manager is a native SwiftUI menu-bar lifecycle owner for the existing
 cross-platform CodexPro-Safe connector. It is an additive peer to the Windows
 Manager; it does not replace or weaken the Windows implementation.
 
-## Phase 3 boundary
+## Phase 4 boundary
 
 The first implementation provides direct shell-free connector launch, Safe
 access profiles, process-group stop/restart, loopback authenticated health
@@ -17,6 +17,29 @@ signing, a component installer, repeatable bundle/payload checks, and a reversib
 Launch at Login register/status/unregister proof. The default build uses an
 ad-hoc app signature and an unsigned installer for local development only. It is
 not a public release artifact.
+
+Phase 4 adds confirmed exact-process takeover for a local connector started
+outside the Manager. The Manager first requires authenticated loopback health,
+then resolves exactly one `127.0.0.1` listener using the fixed system `lsof`,
+reads native process identity through `libproc`/`sysctl`, and requires all of the
+following to match:
+
+- listener and direct owner PIDs and immutable start identities;
+- the configured Node executable for both processes;
+- the repository working directory and canonical connector/HTTP script paths;
+- the complete root, allowed-root, port, local tunnel, diagnostics, access,
+  write, Bash, and no-copy argument contract with no duplicates or extras;
+- a dedicated process group containing exactly the owner and listener, with no
+  third process present.
+
+The confirmation dialog is shown only after that proof. Identity is read and
+compared again immediately before signaling. Cancellation and every mismatch
+send no signal. Confirming takeover interrupts active local MCP sessions, stops
+only the verified isolated group, requires the old authenticated health endpoint
+to disappear, and then starts a fresh Manager-owned connector. If relaunch fails,
+the Manager reports degraded status and leaves the external process stopped;
+correct the setting and choose **Start All** to retry. Unrelated listeners and
+process groups remain untouched.
 
 Codex diagnostic read and maintenance filesystem features remain unavailable
 and effectively off. Do not add the home directory, `~/.codex`, generic runtime
@@ -36,6 +59,7 @@ npm run manager:mac:test
 npm run manager:mac:build
 npm run manager:mac:package
 npm run manager:mac:verify-bundle
+npm run manager:mac:test-takeover
 ```
 
 Packaging writes ignored development artifacts to `artifacts/macos/`: the app,
@@ -89,7 +113,6 @@ an OS sandbox.
 
 - obtain Developer ID Application and Installer identities, notarize the package,
   inspect the notary log, and test the stapled installer on a clean second Mac;
-- prove controlled takeover of an exact matching externally started process;
 - add public-channel readiness and rollback exercises for each tunnel adapter;
 - add a macOS-native diagnostic-helper trust design before enabling diagnostics;
 - complete update, installed-app rollback, and accessibility proof.
