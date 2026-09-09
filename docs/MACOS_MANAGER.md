@@ -250,6 +250,31 @@ smoke directly. The consolidated engineering gate is:
 npm run manager:mac:release-readiness
 ```
 
+For live and physical checkpoints, use the read-only certification runner. It
+verifies the installed Manager as the actual launch owner, separate connector
+and tunnel process groups, listener containment, exact tunnel identity, live and
+ready status, the `main` probe, the sealed helper, the configured Keychain key,
+and a real local MCP call. It writes only sanitized ignored evidence under
+`.ai-bridge/`; paths, tunnel/provider identifiers, credentials, payloads, and
+process IDs are deliberately omitted.
+
+```bash
+npm run manager:mac:certify-live -- --stage baseline
+npm run manager:mac:certify-live -- --stage post-reboot --installation system
+npm run manager:mac:certify-live -- --stage post-wake
+npm run manager:mac:certify-live -- --stage soak \
+  --duration-seconds 3600 --required-recoveries 2
+```
+
+`baseline` fails unless Planning mode, connector auto-start off, and Launch at
+Login off are preserved. `post-reboot` is intentionally different: enable both
+startup controls first, reboot, then run it; restore both controls afterward if
+the daily-driver policy should remain opt-in. During the one-hour `soak`, perform
+at least two deliberate network interruptions and recoveries. The runner never
+changes network, startup, process, app, or credential state itself. A remote
+ChatGPT/Codex tool call and VoiceOver traversal remain separate manual evidence;
+the local runner does not claim either one.
+
 Set `CODEXPRO_MAC_CERTIFY_RELEASE=1` only when the Developer ID and notary
 environment names are configured; that adds the Apple credential preflight.
 The script intentionally distinguishes passing engineering gates from external
