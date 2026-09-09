@@ -30,6 +30,18 @@ if [[ -n "$notary_profile" && ("$app_identity" == "-" || -z "$installer_identity
   echo "Notarization requires Developer ID Application and Installer identities." >&2
   exit 1
 fi
+if [[ "$app_identity" != "-" ]] && ! security find-identity -v -p codesigning | grep -Fq "\"$app_identity\""; then
+  echo "The configured Developer ID Application identity is unavailable." >&2
+  exit 1
+fi
+if [[ -n "$installer_identity" ]] && ! security find-certificate -c "$installer_identity" -Z >/dev/null 2>&1; then
+  echo "The configured Developer ID Installer certificate is unavailable." >&2
+  exit 1
+fi
+if [[ -n "$notary_profile" ]] && ! xcrun notarytool history --keychain-profile "$notary_profile" >/dev/null; then
+  echo "The configured notarytool Keychain profile is unavailable or invalid." >&2
+  exit 1
+fi
 
 mkdir -p "$output_root"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/codexpro-safe-manager-package.XXXXXX")"
@@ -45,10 +57,15 @@ cp "$plist_source" "$staged_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$staged_app/Contents/Info.plist"
 install -m 0755 "$binary_root/CodexProSafeManager" "$staged_app/Contents/MacOS/CodexProSafeManager"
 install -m 0755 "$binary_root/CodexProSafeLauncher" "$staged_app/Contents/MacOS/CodexProSafeLauncher"
+install -m 0755 "$binary_root/CodexProSafeDiagnosticHelper" "$staged_app/Contents/MacOS/CodexProSafeDiagnosticHelper"
 
 sign_options=(--force --options runtime --sign "$app_identity")
 if [[ "$app_identity" != "-" ]]; then sign_options+=(--timestamp); fi
 codesign "${sign_options[@]}" "$staged_app/Contents/MacOS/CodexProSafeLauncher"
+codesign "${sign_options[@]}" "$staged_app/Contents/MacOS/CodexProSafeDiagnosticHelper"
+helper_sha="$(shasum -a 256 "$staged_app/Contents/MacOS/CodexProSafeDiagnosticHelper" | awk '{print $1}')"
+printf '{"protocolVersion":"codexpro-diagnostic-v1","executable":"CodexProSafeDiagnosticHelper","sha256":"%s"}\n' "$helper_sha" \
+  >"$staged_app/Contents/Resources/CodexProSafeDiagnosticHelper.json"
 codesign "${sign_options[@]}" "$staged_app"
 codesign --verify --deep --strict --verbose=2 "$staged_app"
 
@@ -56,6 +73,14 @@ rm -rf "$app_path"
 rm -f "$zip_path" "$pkg_path" "$checksum_path"
 ditto "$staged_app" "$app_path"
 ditto -c -k --sequesterRsrc --keepParent "$app_path" "$zip_path"
+
+if [[ -n "$notary_profile" ]]; then
+  xcrun notarytool submit "$zip_path" --keychain-profile "$notary_profile" --wait
+  xcrun stapler staple "$app_path"
+  xcrun stapler validate "$app_path"
+  rm -f "$zip_path"
+  ditto -c -k --sequesterRsrc --keepParent "$app_path" "$zip_path"
+fi
 
 pkg_arguments=(--component "$app_path" --install-location /Applications
   --identifier com.prometheusprophet.codexpro-safe-manager.pkg --version "$version")

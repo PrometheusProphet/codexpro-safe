@@ -102,6 +102,15 @@ jobs:
       - name: Verify macOS Manager auto-start and recovery
         run: npm run manager:mac:test-autostart
 
+      - name: Verify authenticated secure-tunnel lifecycle
+        run: npm run manager:mac:test-secure-tunnel
+
+      - name: Verify install, update, rollback, and removal lifecycle
+        run: npm run manager:mac:test-install-lifecycle
+
+      - name: Verify repeated recovery and short soak
+        run: npm run manager:mac:test-soak
+
       - name: Verify development installation lifecycle
         run: |
           CODEXPRO_MAC_OPEN_AFTER_INSTALL=0 npm run manager:mac:install-development

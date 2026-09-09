@@ -15,13 +15,16 @@ final class ManagerModel: NSObject, ObservableObject {
     @Published var launchAtLogin = false
     @Published var pendingTakeover: ExternalConnectorPlan?
     @Published var showingTakeoverConfirmation = false
+    @Published var diagnosticHelperState = "unavailable"
     private var connectorProcess: Process?
     private var tunnelProcess: Process?
     private var healthTask: Task<Void, Never>?
+    private var monitorTask: Task<Void, Never>?
     private var intentionalStop = false
     private var restartRequested = false
     private var suppressNextTunnelRecovery = false
     private var wakeObserver: NSObjectProtocol?
+    private var terminationObserver: NSObjectProtocol?
     private let store: SettingsFileStore
 
     override init() {
@@ -38,12 +41,23 @@ final class ManagerModel: NSObject, ObservableObject {
         settings = SettingsFileStore.loadSynchronously(url: settingsURL, defaults: defaults)
         launchAtLogin = SMAppService.mainApp.status == .enabled
         super.init()
+        if let executable = Bundle.main.executableURL,
+           (try? DiagnosticHelperTrust.verify(appExecutableURL: executable)) != nil {
+            diagnosticHelperState = "sealed (off by default)"
+        }
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.recoverAfterWake() }
+        }
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stopManagedProcessesForTermination() }
         }
         if (try? settings.validated()) == nil {
             status = "Setup required: choose the CodexPro-Safe repository and workspace in Settings"
@@ -91,6 +105,7 @@ final class ManagerModel: NSObject, ObservableObject {
                 arguments: checked.launcherArguments(),
                 directory: checked.repository,
                 environment: environment,
+                captureOutput: true,
                 exit: { [weak self] code in self?.connectorDidExit(code: code) }
             )
             healthTask = Task { await verifyConnectorHealth(checked, token: token) }
@@ -114,6 +129,8 @@ final class ManagerModel: NSObject, ObservableObject {
         status = "Stopping services"
         healthTask?.cancel()
         healthTask = nil
+        monitorTask?.cancel()
+        monitorTask = nil
         signalOwned(tunnelProcess, signal: SIGTERM)
         signalOwned(connectorProcess, signal: SIGTERM)
         forceStopAfterGrace([tunnelProcess, connectorProcess].compactMap { $0 })
@@ -236,14 +253,20 @@ final class ManagerModel: NSObject, ObservableObject {
     }
 
     func quit() {
+        stopManagedProcessesForTermination()
+        NSApplication.shared.terminate(nil)
+    }
+
+    private func stopManagedProcessesForTermination() {
         intentionalStop = true
+        healthTask?.cancel()
+        monitorTask?.cancel()
         let children = [tunnelProcess, connectorProcess].compactMap { $0 }
         for child in children { signalOwned(child, signal: SIGTERM) }
         for _ in 0..<100 where children.contains(where: \.isRunning) { usleep(10_000) }
         for child in children where child.isRunning {
             signalOwned(child, signal: SIGKILL)
         }
-        NSApplication.shared.terminate(nil)
     }
 
     private func verifyConnectorHealth(_ checked: ManagerSettings, token: String) async {
@@ -255,6 +278,7 @@ final class ManagerModel: NSObject, ObservableObject {
                 } else {
                     state = .ready
                     status = token.isEmpty ? "Connector ready" : "Connector ready and authenticated"
+                    beginMonitoring(checked, token: token)
                 }
                 return
             }
@@ -356,6 +380,7 @@ final class ManagerModel: NSObject, ObservableObject {
                 arguments: checked.tunnelArguments,
                 directory: checked.repository,
                 environment: environment,
+                captureOutput: false,
                 exit: { [weak self] code in self?.tunnelDidExit(code: code) }
             )
             for _ in 0..<120 {
@@ -363,6 +388,8 @@ final class ManagerModel: NSObject, ObservableObject {
                 if await tunnelIsReady(checked, expectedTunnelID: expectedID) {
                     state = .ready
                     status = "Connector and authenticated OpenAI secure tunnel ready"
+                    let token = try KeychainTokenStore.read(account: .httpToken)
+                    beginMonitoring(checked, token: token)
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(250))
@@ -418,7 +445,8 @@ final class ManagerModel: NSObject, ObservableObject {
     }
 
     private func launchManaged(executable: String, arguments: [String], directory: String,
-                               environment: [String: String], exit: @escaping @MainActor (Int32) -> Void) throws -> Process {
+                               environment: [String: String], captureOutput: Bool,
+                               exit: @escaping @MainActor (Int32) -> Void) throws -> Process {
         guard let managerExecutable = Bundle.main.executableURL else {
             throw ManagerError.invalid("Manager executable location is unavailable.")
         }
@@ -431,12 +459,17 @@ final class ManagerModel: NSObject, ObservableObject {
         child.arguments = [executable] + arguments
         child.environment = environment
         child.currentDirectoryURL = URL(fileURLWithPath: directory)
-        let output = Pipe()
-        child.standardOutput = output
-        child.standardError = output
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let text = String(decoding: handle.availableData, as: UTF8.self)
-            Task { @MainActor in self?.append(text) }
+        if captureOutput {
+            let output = Pipe()
+            child.standardOutput = output
+            child.standardError = output
+            output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let text = String(decoding: handle.availableData, as: UTF8.self)
+                Task { @MainActor in self?.append(text) }
+            }
+        } else {
+            child.standardOutput = FileHandle.nullDevice
+            child.standardError = FileHandle.nullDevice
         }
         child.terminationHandler = { terminated in
             let code = terminated.terminationStatus
@@ -448,6 +481,31 @@ final class ManagerModel: NSObject, ObservableObject {
             throw ManagerError.invalid("Could not isolate a managed process group.")
         }
         return child
+    }
+
+    private func beginMonitoring(_ checked: ManagerSettings, token: String) {
+        monitorTask?.cancel()
+        monitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled, let self else { return }
+                guard await self.healthIsReady(checked.localHealthURL, token: token) else {
+                    self.state = .degraded
+                    self.status = "Connector lost authenticated health"
+                    if checked.restartOnFailure { self.restart() }
+                    return
+                }
+                if checked.tunnelMode == .openAI {
+                    guard let expectedID = TunnelReadiness.expectedTunnelID(profile: checked.tunnelProfile),
+                          await self.tunnelIsReady(checked, expectedTunnelID: expectedID) else {
+                        self.state = .degraded
+                        self.status = "Secure tunnel lost authenticated readiness; local connector remains available"
+                        if checked.restartOnFailure { self.signalOwned(self.tunnelProcess, signal: SIGTERM) }
+                        return
+                    }
+                }
+            }
+        }
     }
 
     private func signalOwned(_ child: Process?, signal: Int32) {
@@ -508,10 +566,16 @@ struct ManagerMenu: View {
     @EnvironmentObject var model: ManagerModel
     var body: some View {
         Text(model.status).font(.headline)
+            .accessibilityLabel("Service status")
+            .accessibilityValue(model.status)
+            .accessibilityIdentifier("service-status")
         Divider()
         Button("Start All") { model.start() }.disabled(model.state == .starting || model.state == .ready)
+            .accessibilityIdentifier("start-all")
         Button("Restart All") { model.restart() }.disabled(model.state == .stopped)
+            .accessibilityIdentifier("restart-all")
         Button("Stop All") { model.stop() }.disabled(model.state == .stopped)
+            .accessibilityIdentifier("stop-all")
         Button("Take Over Existing…") { model.prepareTakeover() }
             .disabled(model.state == .starting || model.state == .ready || model.state == .stopping)
             .confirmationDialog(
@@ -553,10 +617,12 @@ struct SettingsView: View {
             Picker("Access", selection: $model.settings.accessProfile) {
                 ForEach(AccessProfile.allCases, id: \.self) { Text($0.rawValue.capitalized) }
             }
+            .accessibilityHint("Planning is the safest default; broader profiles are explicit.")
             Picker("Tunnel", selection: $model.settings.tunnelMode) {
                 Text("Local only").tag(TunnelMode.none)
                 Text("OpenAI Secure MCP Tunnel").tag(TunnelMode.openAI)
             }
+            .accessibilityHint("Local only is the default. Secure tunnel is outbound and requires separate credentials.")
             if model.settings.tunnelMode == .openAI {
                 fileField("Tunnel client", path: $model.settings.tunnelClientPath)
                 TextField("Tunnel profile", text: $model.settings.tunnelProfile)
@@ -577,8 +643,12 @@ struct SettingsView: View {
                 Button("Save Connector Token") { model.saveToken(token); token = "" }
             }
             Text("Secure tunneling is outbound-only and opt-in. Readiness requires exact profile identity plus an authenticated healthy main channel.").foregroundStyle(.secondary)
-            Text("Codex diagnostics remain off until native trust proof is implemented.").foregroundStyle(.secondary)
+            LabeledContent("Native diagnostic helper", value: model.diagnosticHelperState)
+            Text("Codex diagnostics remain off until authenticated Manager-to-connector launch proof is enabled.").foregroundStyle(.secondary)
             Text(model.status).foregroundStyle(.secondary)
+                .accessibilityLabel("Settings status")
+                .accessibilityValue(model.status)
+                .accessibilityIdentifier("settings-status")
         }
         .padding(20)
         .frame(width: 620)
@@ -643,6 +713,26 @@ enum ManagerCommand {
             if arguments.contains("--login-item-status") {
                 print(statusName(SMAppService.mainApp.status))
                 exit(0)
+            }
+            if arguments.contains("--diagnostic-helper-status") {
+                guard let executable = Bundle.main.executableURL else { print("unavailable"); exit(1) }
+                do {
+                    _ = try DiagnosticHelperTrust.verify(appExecutableURL: executable)
+                    print("sealed")
+                    exit(0)
+                } catch {
+                    print("unavailable")
+                    exit(1)
+                }
+            }
+            if arguments.contains("--control-plane-key-status") {
+                do {
+                    print(try KeychainTokenStore.read(account: .controlPlaneKey).isEmpty ? "absent" : "configured")
+                    exit(0)
+                } catch {
+                    print("unavailable")
+                    exit(1)
+                }
             }
             if arguments.contains("--login-item-register") {
                 try SMAppService.mainApp.register()

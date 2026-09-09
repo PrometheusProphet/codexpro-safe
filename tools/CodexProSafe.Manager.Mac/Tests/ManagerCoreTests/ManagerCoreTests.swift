@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import ManagerCore
 
 final class ManagerCoreTests: XCTestCase {
@@ -71,7 +72,10 @@ final class ManagerCoreTests: XCTestCase {
             try JSONSerialization.data(withJSONObject: [
                 "control_plane_tunnel_id": control,
                 "tunnel_metadata": ["ID": metadata],
-                "channels": [["name": "main", "probe_status": probe]]
+                "channels": [
+                    ["name": "main", "probe_status": probe],
+                    ["name": "harpoon", "enabled": false]
+                ]
             ])
         }
         let expected = "tunnel_abc123"
@@ -91,9 +95,48 @@ final class ManagerCoreTests: XCTestCase {
         try Data(repeating: 65, count: 65_537).write(to: root.appendingPathComponent("large.yaml"))
         XCTAssertNil(TunnelReadiness.expectedTunnelID(profile: "large", environment: environment))
     }
+    func testDiagnosticHelperTrustRequiresExactSingleLinkFingerprint() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let macOS = root.appendingPathComponent("Test.app/Contents/MacOS")
+        let resources = root.appendingPathComponent("Test.app/Contents/Resources")
+        let manager = macOS.appendingPathComponent("CodexProSafeManager")
+        let helper = macOS.appendingPathComponent(DiagnosticHelperTrust.executableName)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        XCTAssertTrue(FileManager.default.createFile(atPath: manager.path, contents: Data("manager".utf8)))
+        let helperData = Data("#!/bin/sh\nexit 0\n".utf8)
+        XCTAssertTrue(FileManager.default.createFile(atPath: helper.path, contents: helperData))
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
+        let digest = SHA256.hash(data: helperData).map { String(format: "%02x", $0) }.joined()
+        let manifest: [String: Any] = [
+            "protocolVersion": DiagnosticHelperTrust.protocolVersion,
+            "executable": DiagnosticHelperTrust.executableName,
+            "sha256": digest
+        ]
+        try JSONSerialization.data(withJSONObject: manifest).write(
+            to: resources.appendingPathComponent(DiagnosticHelperTrust.manifestName)
+        )
+        XCTAssertEqual(try DiagnosticHelperTrust.verify(appExecutableURL: manager).sha256, digest)
+
+        let secondLink = macOS.appendingPathComponent("unexpected-hard-link")
+        try FileManager.default.linkItem(at: helper, to: secondLink)
+        XCTAssertThrowsError(try DiagnosticHelperTrust.verify(appExecutableURL: manager))
+        try FileManager.default.removeItem(at: secondLink)
+        try FileManager.default.removeItem(at: helper)
+        let outside = root.appendingPathComponent("outside-helper")
+        XCTAssertTrue(FileManager.default.createFile(atPath: outside.path, contents: helperData))
+        try FileManager.default.createSymbolicLink(at: helper, withDestinationURL: outside)
+        XCTAssertThrowsError(try DiagnosticHelperTrust.verify(appExecutableURL: manager))
+    }
     func testLogSanitization() {
-        let value = LogSanitizer.sanitize("Authorization: Bearer secret-value /Users/example/private/file")
-        XCTAssertFalse(value.contains("secret-value")); XCTAssertFalse(value.contains("/Users/example"))
+        let value = LogSanitizer.sanitize(
+            "Authorization: Bearer secret-value sk-proj-example123 github_pat_example123 /Users/example/private/file"
+        )
+        XCTAssertFalse(value.contains("secret-value"))
+        XCTAssertFalse(value.contains("sk-proj-example123"))
+        XCTAssertFalse(value.contains("github_pat_example123"))
+        XCTAssertFalse(value.contains("/Users/example"))
     }
     func testContainmentUsesPathComponents() {
         XCTAssertTrue(contains("/repo/child", within: "/repo")); XCTAssertFalse(contains("/repository", within: "/repo"))

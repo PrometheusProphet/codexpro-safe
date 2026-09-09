@@ -12,6 +12,7 @@ settings_file="$HOME/Library/Application Support/CodexProSafe Manager/settings.j
 
 test -x "$manager_binary"
 codesign --verify --deep --strict "$installed_app"
+test "$("$manager_binary" --diagnostic-helper-status)" = "sealed"
 test -f "$settings_file"
 test "$(stat -f '%Lp' "$settings_file")" = "600"
 

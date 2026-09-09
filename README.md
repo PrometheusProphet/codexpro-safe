@@ -387,8 +387,13 @@ preflight, separate process-group lifecycle, exact authenticated tunnel identity
 and main-channel readiness, and independent tunnel recovery while the local
 connector remains available. This is an outbound private connection rather than
 a public inbound listener. Its native
-diagnostic profile remains off until a separate macOS trust boundary is
-implemented and reviewed.
+diagnostic profile remains off, while Phase 7 adds a signed app-local native
+helper with fixed-root, descriptor-relative metadata operations and sealed
+fingerprint/protocol verification as the prerequisite trust boundary. Phase 8
+adds continuous authenticated health monitoring, accessibility semantics,
+privacy-tight tunnel output handling, repeated recovery/soak proof, and a
+consolidated release-readiness gate that keeps Apple and physical-device
+certification distinct from automated engineering results.
 
 If `cloudflared` is missing, install it yourself, pass `--cloudflared <path>`, or explicitly run:
 

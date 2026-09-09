@@ -107,14 +107,16 @@ export class ManagedWindowsDiagnosticBoundary implements WindowsDiagnosticBounda
   }
 
   private async start(): Promise<void> {
-    if (process.platform !== "win32" && !this.options.commandForTest) throw new Error("Windows diagnostic helper unavailable");
+    if (!["win32", "darwin"].includes(process.platform) && !this.options.commandForTest) {
+      throw new Error("Native diagnostic helper unavailable");
+    }
     const executable = await fs.readFile(this.options.executablePath);
     const actualHash = createHash("sha256").update(executable).digest("hex");
     if (actualHash !== this.options.expectedSha256.toLowerCase()) throw new Error("diagnostic helper fingerprint mismatch");
 
     const command = this.options.commandForTest ?? this.options.executablePath;
     const args = this.options.argumentsForTest ?? ["--serve"];
-    const allowedEnvironment = ["SystemRoot", "WINDIR", "USERPROFILE", "TEMP", "TMP"];
+    const allowedEnvironment = ["SystemRoot", "WINDIR", "USERPROFILE", "HOME", "TMPDIR", "TEMP", "TMP"];
     const environment = Object.fromEntries(allowedEnvironment.flatMap((name) => process.env[name] ? [[name, process.env[name]!]] : []));
     const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, shell: false, env: environment });
     this.child = child;

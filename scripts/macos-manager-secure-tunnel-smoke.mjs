@@ -46,7 +46,7 @@ http.createServer((request, response) => {
   response.setHeader('content-type', 'application/json');
   if (request.url === '/healthz' || request.url === '/readyz') { response.end('{"ok":true}'); return; }
   if (request.url === '/api/status') {
-    response.end(JSON.stringify({control_plane_tunnel_id:id,tunnel_metadata:{ID:id},channels:[{name:'main',probe_status:'ok'}]}));
+    response.end(JSON.stringify({control_plane_tunnel_id:id,tunnel_metadata:{ID:id},channels:[{name:'main',probe_status:'ok'},{name:'harpoon',enabled:false}]}));
     return;
   }
   response.statusCode = 404; response.end('{}');
@@ -129,13 +129,24 @@ async function verifyLocalToolCall() {
 }
 
 try {
-  const firstTunnelGroup = await waitForTunnel();
+  const recoveryCycles = Math.max(1, Math.min(10, Number(process.env.CODEXPRO_MAC_RECOVERY_CYCLES ?? 1)));
+  const soakSeconds = Math.max(0, Math.min(3600, Number(process.env.CODEXPRO_MAC_SOAK_SECONDS ?? 0)));
+  let tunnelGroup = await waitForTunnel();
   await verifyLocalToolCall();
-  process.kill(-firstTunnelGroup, 'SIGKILL');
-  const recoveredTunnelGroup = await waitForTunnel(firstTunnelGroup);
-  assert.notEqual(recoveredTunnelGroup, firstTunnelGroup);
-  await verifyLocalToolCall();
-  console.log('✓ connector + authenticated secure-tunnel lifecycle and independent tunnel recovery proof passed');
+  for (let cycle = 0; cycle < recoveryCycles; cycle += 1) {
+    process.kill(-tunnelGroup, 'SIGKILL');
+    const recoveredTunnelGroup = await waitForTunnel(tunnelGroup);
+    assert.notEqual(recoveredTunnelGroup, tunnelGroup);
+    tunnelGroup = recoveredTunnelGroup;
+    await verifyLocalToolCall();
+  }
+  const soakDeadline = Date.now() + soakSeconds * 1_000;
+  while (Date.now() < soakDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(5_000, Math.max(1, soakDeadline - Date.now()))));
+    assert.equal(listenerGroup(tunnelPort), tunnelGroup);
+    await verifyLocalToolCall();
+  }
+  console.log(`✓ connector + authenticated secure-tunnel lifecycle, ${recoveryCycles} recovery cycle(s), and ${soakSeconds}s soak proof passed`);
 } finally {
   for (const port of [tunnelPort, connectorPort]) {
     const group = listenerGroup(port);

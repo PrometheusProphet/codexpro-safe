@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Darwin
 
 public enum AccessProfile: String, Codable, CaseIterable, Sendable {
     case planning, edit, develop, full
@@ -132,7 +134,7 @@ public struct TunnelStatusDocument: Decodable, Sendable {
     public struct Metadata: Decodable, Sendable { public let ID: String }
     public struct Channel: Decodable, Sendable {
         public let name: String
-        public let probe_status: String
+        public let probe_status: String?
     }
     public let control_plane_tunnel_id: String
     public let tunnel_metadata: Metadata
@@ -147,7 +149,7 @@ public enum TunnelReadiness {
               !status.tunnel_metadata.ID.isEmpty,
               status.control_plane_tunnel_id == status.tunnel_metadata.ID,
               expectedTunnelID == status.tunnel_metadata.ID else { return false }
-        return status.channels.contains { $0.name == "main" && $0.probe_status.lowercased() == "ok" }
+        return status.channels.contains { $0.name == "main" && $0.probe_status?.lowercased() == "ok" }
     }
 
     public static func expectedTunnelID(profile: String, environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -171,6 +173,70 @@ public enum TunnelReadiness {
               let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),
               let range = Range(match.range(at: 1), in: content) else { return nil }
         return String(content[range])
+    }
+}
+
+public struct DiagnosticHelperContract: Equatable, Sendable {
+    public let executablePath: String
+    public let protocolVersion: String
+    public let sha256: String
+}
+
+public enum DiagnosticHelperTrust {
+    public static let protocolVersion = "codexpro-diagnostic-v1"
+    public static let executableName = "CodexProSafeDiagnosticHelper"
+    public static let manifestName = "CodexProSafeDiagnosticHelper.json"
+
+    private struct Manifest: Decodable {
+        let protocolVersion: String
+        let executable: String
+        let sha256: String
+    }
+
+    public static func verify(appExecutableURL: URL, fileManager: FileManager = .default) throws -> DiagnosticHelperContract {
+        let executable = appExecutableURL.resolvingSymlinksInPath().standardizedFileURL
+        let macOSDirectory = executable.deletingLastPathComponent()
+        let contentsDirectory = macOSDirectory.deletingLastPathComponent()
+        let manifestURL = contentsDirectory.appendingPathComponent("Resources").appendingPathComponent(manifestName)
+        guard let manifestData = try? Data(contentsOf: manifestURL), manifestData.count <= 4_096,
+              let object = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
+              Set(object.keys) == Set(["protocolVersion", "executable", "sha256"]),
+              let manifest = try? JSONDecoder().decode(Manifest.self, from: manifestData),
+              manifest.protocolVersion == protocolVersion,
+              manifest.executable == executableName,
+              manifest.sha256.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else {
+            throw ManagerError.invalid("The native diagnostic helper manifest is missing or invalid.")
+        }
+        let directoryFD = open(macOSDirectory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        guard directoryFD >= 0 else { throw ManagerError.invalid("The native diagnostic helper directory could not be opened safely.") }
+        defer { close(directoryFD) }
+        let helperFD = openat(directoryFD, executableName, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard helperFD >= 0 else { throw ManagerError.invalid("The native diagnostic helper could not be opened safely.") }
+        defer { close(helperFD) }
+        var value = stat()
+        guard fstat(helperFD, &value) == 0,
+              (value.st_mode & S_IFMT) == S_IFREG,
+              value.st_nlink == 1,
+              value.st_uid == getuid(),
+              value.st_size > 0,
+              value.st_size <= 64 * 1024 * 1024 else {
+            throw ManagerError.invalid("The native diagnostic helper has unsafe object identity.")
+        }
+        let handle = FileHandle(fileDescriptor: helperFD, closeOnDealloc: false)
+        try handle.seek(toOffset: 0)
+        var hash = SHA256()
+        var total = 0
+        while let data = try handle.read(upToCount: 65_536), !data.isEmpty {
+            total += data.count
+            guard total <= value.st_size else { throw ManagerError.invalid("The native diagnostic helper changed while hashing.") }
+            hash.update(data: data)
+        }
+        guard total == value.st_size else { throw ManagerError.invalid("The native diagnostic helper changed while hashing.") }
+        let actual = hash.finalize().map { String(format: "%02x", $0) }.joined()
+        guard actual == manifest.sha256 else { throw ManagerError.invalid("The native diagnostic helper fingerprint does not match this app.") }
+        let helperPath = macOSDirectory.appendingPathComponent(executableName).path
+        guard fileManager.isExecutableFile(atPath: helperPath) else { throw ManagerError.invalid("The native diagnostic helper is not executable.") }
+        return DiagnosticHelperContract(executablePath: helperPath, protocolVersion: protocolVersion, sha256: actual)
     }
 }
 
@@ -199,6 +265,7 @@ public enum LogSanitizer {
         var value = input
         let patterns = [#"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s]+"#,
                         #"(?i)((?:api[_-]?key|token|secret)\s*[:=]\s*)[^\s]+"#,
+                        #"\b(?:sk|ghp|github_pat)-?[A-Za-z0-9_-]{8,}\b"#,
                         #"https?://[^\s/?#]+(?::\d+)?/[^\s]*[?&][^\s]+"#,
                         #"/(?:Users|private|Volumes)/[^\s]+"#]
         for pattern in patterns {

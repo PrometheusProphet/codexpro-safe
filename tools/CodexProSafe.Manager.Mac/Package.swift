@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .executable(name: "CodexProSafeManager", targets: ["CodexProSafeManager"]),
         .executable(name: "CodexProSafeLauncher", targets: ["CodexProSafeLauncher"]),
+        .executable(name: "CodexProSafeDiagnosticHelper", targets: ["CodexProSafeDiagnosticHelper"]),
         .executable(name: "CodexProSafeTakeoverHarness", targets: ["CodexProSafeTakeoverHarness"]),
         .library(name: "ManagerCore", targets: ["ManagerCore"])
     ],
@@ -14,6 +15,7 @@ let package = Package(
         .target(name: "ProcessInspectionC", publicHeadersPath: "include", linkerSettings: [.linkedLibrary("proc")]),
         .target(name: "ManagerCore", dependencies: ["ProcessInspectionC"]),
         .executableTarget(name: "CodexProSafeLauncher"),
+        .executableTarget(name: "CodexProSafeDiagnosticHelper"),
         .executableTarget(name: "CodexProSafeManager", dependencies: ["ManagerCore"]),
         .executableTarget(name: "CodexProSafeTakeoverHarness", dependencies: ["ManagerCore"]),
         .testTarget(name: "ManagerCoreTests", dependencies: ["ManagerCore"])

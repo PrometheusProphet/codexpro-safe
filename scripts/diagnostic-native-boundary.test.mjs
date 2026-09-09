@@ -80,6 +80,13 @@ if (process.argv[2] === '--fixture') {
     await actual.ready();
     actual.close();
   }
+  if (process.platform === 'darwin') {
+    const helper = path.resolve('tools/CodexProSafe.Manager.Mac/.build/debug/CodexProSafeDiagnosticHelper');
+    const helperHash = createHash('sha256').update(await fs.readFile(helper)).digest('hex');
+    const actual = new ManagedWindowsDiagnosticBoundary({ executablePath: helper, expectedProtocol: DIAGNOSTIC_HELPER_PROTOCOL, expectedSha256: helperHash });
+    await actual.ready();
+    actual.close();
+  }
 
   console.log('diagnostic native boundary tests passed');
 }

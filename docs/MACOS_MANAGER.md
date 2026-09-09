@@ -53,9 +53,24 @@ only missing settings with the Planning profile, preserves existing settings,
 and does not register a login item.
 
 Codex diagnostic read and maintenance filesystem features remain unavailable
-and effectively off. Do not add the home directory, `~/.codex`, generic runtime
-reads, or a substitute helper until a separate macOS-native trust proof passes
-its own security review.
+and effectively off by default. Phase 7 packages a native diagnostic helper and
+proves its prerequisite trust boundary without yet advertising diagnostic tools.
+The helper has no generic path input: production mode derives the current user's
+fixed `~/.codex` root through the account database, opens it with `O_NOFOLLOW`,
+and performs bounded descriptor-relative metadata/config/database operations.
+Selected files must be owned by the current user, regular, single-link objects;
+symlinks, hard links, oversized files, ambiguous databases, malformed framing,
+and protocol mismatches fail closed.
+
+The universal helper is individually signed before its SHA-256 manifest is
+generated; the enclosing signed app seals that manifest. At runtime, the Manager
+opens the exact app-local helper relative to the `Contents/MacOS` directory,
+requires safe object identity, hashes the opened descriptor, and compares the
+exact protocol/name/fingerprint contract. Unit tests prove fingerprint, symlink,
+and hard-link refusal; the native framing gate proves a real helper handshake.
+The installed-app verifier requires the sanitized state `sealed`. Enabling the
+tools still requires a separately authenticated Manager-to-connector launch
+capability, so the UI truthfully reports the helper as sealed but off.
 
 Local-only remains the default. A listening process or port alone is not
 reported as ready; the Manager requires an HTTP 200 from the connector's
@@ -96,6 +111,8 @@ npm run manager:mac:verify-bundle
 npm run manager:mac:test-takeover
 npm run manager:mac:test-autostart
 npm run manager:mac:test-secure-tunnel
+npm run manager:mac:test-install-lifecycle
+npm run test:diagnostic-native-boundary
 ```
 
 The secure-tunnel smoke uses a synthetic control plane and never contacts
@@ -172,10 +189,28 @@ npm run manager:mac:package
 ```
 
 The packaging script enables the hardened runtime, requests a secure timestamp,
-submits the installer with `notarytool`, staples the ticket, and validates it.
+submits the ZIP, staples and validates the app, rebuilds the ZIP with the stapled
+ticket, then submits, staples, and validates the installer with `notarytool`.
 It fails closed if notarization is requested without both Developer ID
 identities. Credentials remain in Apple's Keychain and are never accepted as
 script arguments or repository files.
+
+Before a distribution build, verify that all three external prerequisites exist:
+
+```bash
+CODEXPRO_MAC_APP_SIGN_IDENTITY="Developer ID Application: Example (TEAMID)" \
+CODEXPRO_MAC_INSTALLER_SIGN_IDENTITY="Developer ID Installer: Example (TEAMID)" \
+CODEXPRO_MAC_NOTARY_PROFILE="codexpro-safe-notary" \
+npm run manager:mac:release-preflight
+```
+
+The isolated install lifecycle gate verifies initial installation, a signed
+atomic update, refusal of a tampered update, rollback to the byte-identical
+previous executable, and recoverable removal without writing to `/Applications`
+or changing live settings. Final Phase 6 certification still requires the real
+Developer ID identities, successful Apple notary logs, and install/update/
+rollback/removal proof on a clean supported Mac. Local ad-hoc signing cannot
+substitute for any of those external results.
 
 Run the development executable with explicit paths so no shell profile is
 required:
@@ -191,12 +226,49 @@ local-only tunnel, diagnostics off. Repository edit, develop, and full remain
 explicit selections. Full uses the current macOS user's permissions and is not
 an OS sandbox.
 
-## Remaining gates
+## Phase 8 operations and release readiness
 
-- Phase 6: obtain Developer ID Application and Installer identities, notarize the
-  package, inspect the notary log, and prove clean-Mac install, update, rollback,
-  and removal;
-- Phase 7: design and prove a macOS-native diagnostic-helper trust boundary before
-  enabling fixed-root diagnostic reads;
-- Phase 8: complete accessibility, sleep/wake hardware, reboot, prolonged recovery,
-  sanitized operations, and release-readiness proof.
+Phase 8 adds stable accessibility labels and identifiers for service status and
+lifecycle actions, explanatory hints for access/tunnel choices, five-second
+continuous connector and authenticated-tunnel monitoring, and privacy-tight
+process output handling. Connector output is bounded and sanitized; raw tunnel
+client output is not placed in the visual status at all. Standalone OpenAI and
+GitHub-style credential shapes are redacted in addition to authorization,
+token, secret, URL-query, and user-path patterns.
+Both the Manager menu Quit action and native macOS termination notifications
+stop the owned tunnel process group first and the connector group second, so
+Dock Quit, Command-Q, logout, and ordinary application termination do not leave
+orphaned listeners.
+
+The repeated recovery gate forces three independent tunnel process-group
+crashes, proves a new group each time, executes a real local MCP call after each
+recovery, and then performs a short health/tool-call soak. For a longer local
+exercise, set `CODEXPRO_MAC_SOAK_SECONDS` up to 3600 and run the secure-tunnel
+smoke directly. The consolidated engineering gate is:
+
+```bash
+npm run manager:mac:release-readiness
+```
+
+Set `CODEXPRO_MAC_CERTIFY_RELEASE=1` only when the Developer ID and notary
+environment names are configured; that adds the Apple credential preflight.
+The script intentionally distinguishes passing engineering gates from external
+certification. Before a public release, record all of the following on a clean
+supported Mac without replacing them with synthetic results:
+
+1. accepted Apple notary log, stapled app and installer, and Gatekeeper checks;
+2. clean install, signed update, rollback, and recoverable removal;
+3. Launch at Login followed by a real reboot and authenticated connector health;
+4. lid sleep and wake with both local MCP and secure-tunnel remote tool calls;
+5. a one-hour soak with repeated network interruption and process recovery;
+6. VoiceOver/keyboard traversal of status, Start, Restart, Stop, takeover,
+   settings, Safe profile, tunnel choice, and credential controls;
+7. sanitized support evidence with no credential, tunnel payload, private path,
+   `.ai-bridge` snapshot, or machine identifier.
+
+Phase 6 certification still requires Developer ID Application and Installer
+identities, an accepted notary log, and a clean-Mac lifecycle run. Hardware
+sleep/wake, reboot, and accessibility trials also remain physical evidence
+gates. Public release or package publication is a separate explicit
+consequence. The current development app must not be described as an
+Apple-notarized public artifact until those external items are recorded.
