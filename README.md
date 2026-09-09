@@ -369,6 +369,13 @@ buffer is not exposed through UI Automation.
 This does not rename the CodexPro-Safe connector or replace the cross-platform
 CLI workflow.
 
+On macOS 14 or newer, the source-built
+[CodexPro-Safe Manager for macOS](docs/MACOS_MANAGER.md) provides a native
+SwiftUI menu-bar foundation with Safe access profiles, Keychain token storage,
+process-group lifecycle ownership, authenticated loopback health checks, and a
+real MCP tool-call smoke gate. Its native diagnostic profile remains off until
+a separate macOS trust boundary is implemented and reviewed.
+
 If `cloudflared` is missing, install it yourself, pass `--cloudflared <path>`, or explicitly run:
 
 ```bash

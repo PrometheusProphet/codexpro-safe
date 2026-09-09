@@ -7,9 +7,9 @@ source and Git state define behavior; preserve the Safe defaults documented in
 
 ## Routing and stable ownership
 
-Read `docs/MCP_ECOSYSTEM.md` for stable responsibility boundaries and
-`docs/WINDOWS_MANAGER.md` for Manager, Windows startup, credentials, OpenAI
-tunnel, plugin, or Manager behavior. Ignored `.ai-bridge/` is sanitized local
+Read `docs/MCP_ECOSYSTEM.md` for stable responsibility boundaries,
+`docs/WINDOWS_MANAGER.md` for Windows Manager behavior, and
+`docs/MACOS_MANAGER.md` for macOS Manager behavior. Ignored `.ai-bridge/` is sanitized local
 runtime state only: never commit it or promote a snapshot into proof.
 
 CodexPro-Safe is the product/package; CodexPro-Safe Manager owns its specialized

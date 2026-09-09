@@ -64,3 +64,28 @@ jobs:
 
       - name: Test Windows Boundaries
         run: npm run test:windows-boundaries
+
+  macos-manager:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build connector
+        run: npm run build
+
+      - name: Test macOS Manager
+        run: npm run manager:mac:test
+
+      - name: Verify macOS Manager lifecycle
+        run: npm run manager:mac:smoke
