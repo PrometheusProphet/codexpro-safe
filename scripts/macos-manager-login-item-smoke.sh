@@ -11,8 +11,14 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 source_app="$repo_root/artifacts/macos/CodexPro-Safe Manager.app"
 applications_root="$HOME/Applications"
 mkdir -p "$applications_root"
-probe_root="$(mktemp -d "$applications_root/.codexpro-safe-login-item-probe.XXXXXX")"
-probe_app="$probe_root/CodexPro-Safe Manager.app"
+probe_root=""
+if [[ -n "${CODEXPRO_MAC_LOGIN_ITEM_APP:-}" ]]; then
+  probe_app="$CODEXPRO_MAC_LOGIN_ITEM_APP"
+else
+  probe_root="$(mktemp -d "$applications_root/.codexpro-safe-login-item-probe.XXXXXX")"
+  probe_app="$probe_root/CodexPro-Safe Manager.app"
+  ditto "$source_app" "$probe_app"
+fi
 probe_binary="$probe_app/Contents/MacOS/CodexProSafeManager"
 cleanup_registration=false
 
@@ -20,12 +26,11 @@ cleanup() {
   if [[ "$cleanup_registration" == "true" && -x "$probe_binary" ]]; then
     "$probe_binary" --login-item-unregister >/dev/null 2>&1 || true
   fi
-  rm -rf "$probe_root"
+  if [[ -n "$probe_root" ]]; then rm -rf "$probe_root"; fi
 }
 trap cleanup EXIT
 
-test -d "$source_app"
-ditto "$source_app" "$probe_app"
+test -d "$probe_app"
 
 initial_status="$("$probe_binary" --login-item-status)"
 if [[ "$initial_status" == "enabled" || "$initial_status" == "requiresApproval" ]]; then

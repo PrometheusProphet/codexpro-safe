@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Security
 import ServiceManagement
 import Darwin
@@ -7,7 +8,7 @@ import ManagerCore
 enum ServiceState { case stopped, starting, ready, degraded, stopping }
 
 @MainActor
-final class ManagerModel: ObservableObject {
+final class ManagerModel: NSObject, ObservableObject {
     @Published var settings: ManagerSettings
     @Published var state: ServiceState = .stopped
     @Published var status = "Stopped"
@@ -17,9 +18,10 @@ final class ManagerModel: ObservableObject {
     private var process: Process?
     private var healthTask: Task<Void, Never>?
     private var intentionalStop = false
+    private var wakeObserver: NSObjectProtocol?
     private let store: SettingsFileStore
 
-    init() {
+    override init() {
         let environment = ProcessInfo.processInfo.environment
         let repository = environment["CODEXPRO_MANAGER_REPOSITORY"] ?? FileManager.default.currentDirectoryPath
         let node = environment["CODEXPRO_MANAGER_NODE"] ??
@@ -27,10 +29,27 @@ final class ManagerModel: ObservableObject {
                 .first(where: FileManager.default.isExecutableFile(atPath:)) ?? "/usr/local/bin/node"
         let defaults = ManagerSettings.defaults(repository: repository, nodePath: node)
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        store = SettingsFileStore(url: base.appendingPathComponent("CodexProSafe Manager/settings.json"))
-        settings = defaults
+        let settingsURL = environment["CODEXPRO_MANAGER_SETTINGS"].map { URL(fileURLWithPath: $0) }
+            ?? base.appendingPathComponent("CodexProSafe Manager/settings.json")
+        store = SettingsFileStore(url: settingsURL)
+        settings = SettingsFileStore.loadSynchronously(url: settingsURL, defaults: defaults)
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        Task { settings = await store.load(defaults: defaults) }
+        super.init()
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.recoverAfterWake() }
+        }
+        if (try? settings.validated()) == nil {
+            status = "Setup required: choose the CodexPro-Safe repository and workspace in Settings"
+        } else if settings.autoStartServices {
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                self?.start()
+            }
+        }
     }
 
     func save() {
@@ -192,6 +211,32 @@ final class ManagerModel: ObservableObject {
         }
     }
 
+    func recoverAfterWake() {
+        guard settings.autoStartServices, state != .starting, state != .stopping else { return }
+        Task {
+            do {
+                let checked = try settings.validated()
+                let token = try KeychainTokenStore.read()
+                if let child = process, child.isRunning {
+                    if await healthIsReady(checked.localHealthURL, token: token) {
+                        state = .ready
+                        status = token.isEmpty ? "Connector ready after wake" : "Connector ready and authenticated after wake"
+                    } else {
+                        status = "Connector unhealthy after wake; restarting"
+                        restart()
+                    }
+                } else {
+                    state = .stopped
+                    status = "Connector was not running after wake; starting"
+                    start()
+                }
+            } catch {
+                state = .degraded
+                status = error.localizedDescription
+            }
+        }
+    }
+
     func quit() {
         guard let child = process, child.isRunning,
               getpgid(child.processIdentifier) == child.processIdentifier else {
@@ -328,9 +373,16 @@ struct SettingsView: View {
     @State private var token = ""
     var body: some View {
         Form {
-            TextField("Repository", text: $model.settings.repository)
-            TextField("Workspace root", text: $model.settings.workspaceRoot)
-            TextField("Allowed root", text: $model.settings.allowedRoot)
+            directoryField("Repository", path: $model.settings.repository) { selected in
+                let previousRepository = model.settings.repository
+                model.settings.repository = selected
+                if model.settings.workspaceRoot == previousRepository { model.settings.workspaceRoot = selected }
+                if model.settings.allowedRoot == URL(fileURLWithPath: previousRepository).deletingLastPathComponent().path {
+                    model.settings.allowedRoot = URL(fileURLWithPath: selected).deletingLastPathComponent().path
+                }
+            }
+            directoryField("Workspace root", path: $model.settings.workspaceRoot) { model.settings.workspaceRoot = $0 }
+            directoryField("Allowed root", path: $model.settings.allowedRoot) { model.settings.allowedRoot = $0 }
             TextField("Node.js", text: $model.settings.nodePath)
             TextField("Port", value: $model.settings.port, format: .number)
             Picker("Access", selection: $model.settings.accessProfile) {
@@ -339,7 +391,8 @@ struct SettingsView: View {
             LabeledContent("Tunnel", value: "Local only (verified)")
             SecureField("Bearer token", text: $token)
             Toggle("Restart after unexpected exit", isOn: $model.settings.restartOnFailure)
-            Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+            Toggle("Start connector when Manager opens", isOn: $model.settings.autoStartServices)
+            Toggle("Launch Manager at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
             HStack {
                 Button("Save Settings") { model.save() }
                 Button("Save Token") { model.saveToken(token); token = "" }
@@ -350,12 +403,47 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 620)
     }
+
+    private func directoryField(_ label: String, path: Binding<String>, onSelect: @escaping (String) -> Void) -> some View {
+        HStack {
+            TextField(label, text: path)
+            Button("Choose…") {
+                let panel = NSOpenPanel()
+                panel.title = "Choose \(label)"
+                panel.canChooseDirectories = true
+                panel.canChooseFiles = false
+                panel.allowsMultipleSelection = false
+                if FileManager.default.fileExists(atPath: path.wrappedValue) {
+                    panel.directoryURL = URL(fileURLWithPath: path.wrappedValue)
+                }
+                if panel.runModal() == .OK, let selected = panel.url {
+                    onSelect(selected.resolvingSymlinksInPath().standardizedFileURL.path)
+                }
+            }
+        }
+    }
 }
 
-enum LoginItemCommand {
+enum ManagerCommand {
     static func runIfRequested() -> Never? {
-        let arguments = Set(CommandLine.arguments.dropFirst())
+        let orderedArguments = Array(CommandLine.arguments.dropFirst())
+        let arguments = Set(orderedArguments)
         do {
+            if orderedArguments.count == 3, orderedArguments[0] == "--initialize-local-settings" {
+                let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                let settingsURL = base.appendingPathComponent("CodexProSafe Manager/settings.json")
+                if FileManager.default.fileExists(atPath: settingsURL.path) {
+                    print("existing settings preserved")
+                    exit(0)
+                }
+                let settings = try ManagerSettings.defaults(
+                    repository: orderedArguments[1],
+                    nodePath: orderedArguments[2]
+                ).validated()
+                try SettingsFileStore.saveSynchronously(settings, url: settingsURL)
+                print("planning-profile settings initialized")
+                exit(0)
+            }
             if arguments.contains("--login-item-status") {
                 print(statusName(SMAppService.mainApp.status))
                 exit(0)
@@ -393,7 +481,7 @@ struct CodexProSafeManagerApp: App {
     @StateObject private var model: ManagerModel
 
     init() {
-        _ = LoginItemCommand.runIfRequested()
+        _ = ManagerCommand.runIfRequested()
         _model = StateObject(wrappedValue: ManagerModel())
     }
     var body: some Scene {

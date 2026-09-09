@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -31,11 +32,23 @@ async function waitForHealth(port, expected) {
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     let healthy = false;
-    try { healthy = (await fetch(`http://127.0.0.1:${port}/healthz`)).ok; } catch {}
+    try { healthy = await healthIsReady(port); } catch {}
     if (healthy === expected) return;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`Health on port ${port} did not become ${expected ? 'ready' : 'stopped'}.`);
+}
+
+function healthIsReady(port) {
+  return new Promise((resolve, reject) => {
+    const request = http.get({ host: '127.0.0.1', port, path: '/healthz', agent: false },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode === 200);
+      });
+    request.setTimeout(1_000, () => request.destroy(new Error('health timeout')));
+    request.once('error', reject);
+  });
 }
 
 function stopGroup(child) {
@@ -66,7 +79,7 @@ try {
   const refused = spawnSync(harness, ['stop', root, root, allowedRoot, process.execPath, String(mismatchPort), 'planning'],
     { cwd: root, encoding: 'utf8' });
   assert.notEqual(refused.status, 0, 'Mismatched listener must be refused.');
-  assert.equal((await fetch(`http://127.0.0.1:${mismatchPort}/healthz`)).ok, true,
+  assert.equal(await healthIsReady(mismatchPort), true,
     'Refused mismatched listener must remain untouched.');
 
   external = spawn(process.execPath, managerArguments, {

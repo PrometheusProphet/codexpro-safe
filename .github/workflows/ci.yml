@@ -98,3 +98,11 @@ jobs:
 
       - name: Verify macOS Manager bundle
         run: npm run manager:mac:verify-bundle
+
+      - name: Verify macOS Manager auto-start and recovery
+        run: npm run manager:mac:test-autostart
+
+      - name: Verify development installation lifecycle
+        run: |
+          CODEXPRO_MAC_OPEN_AFTER_INSTALL=0 npm run manager:mac:install-development
+          CODEXPRO_MAC_INSTALLED_APP="$HOME/Applications/CodexPro-Safe Manager.app" npm run manager:mac:verify-installed

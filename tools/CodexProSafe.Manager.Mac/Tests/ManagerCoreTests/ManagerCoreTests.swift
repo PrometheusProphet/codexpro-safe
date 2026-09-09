@@ -12,6 +12,28 @@ final class ManagerCoreTests: XCTestCase {
         let data = try JSONEncoder().encode(ManagerSettings.defaults(repository: "/repo", nodePath: "/node"))
         XCTAssertFalse(String(decoding: data, as: UTF8.self).localizedCaseInsensitiveContains("token"))
     }
+    func testExistingSettingsMigrateWithAutoStartOff() throws {
+        let original = ManagerSettings.defaults(repository: "/repo", nodePath: "/node")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        json.removeValue(forKey: "autoStartServices")
+        let decoded = try JSONDecoder().decode(ManagerSettings.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertFalse(decoded.autoStartServices)
+    }
+    func testSynchronousSettingsLoadEliminatesStartupOverwriteWindow() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = root.appendingPathComponent("settings.json")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var saved = ManagerSettings.defaults(repository: "/saved", nodePath: "/saved/node")
+        saved.autoStartServices = true
+        try SettingsFileStore.saveSynchronously(saved, url: url)
+        let loaded = SettingsFileStore.loadSynchronously(
+            url: url,
+            defaults: ManagerSettings.defaults(repository: "/default", nodePath: "/default/node")
+        )
+        XCTAssertEqual(loaded, saved)
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        XCTAssertEqual(attributes[.posixPermissions] as? NSNumber, 0o600)
+    }
     func testFirstManagerSliceIsLocalOnly() {
         XCTAssertEqual(TunnelMode.allCases, [.none])
         let settings = ManagerSettings.defaults(repository: "/repo", nodePath: "/node")

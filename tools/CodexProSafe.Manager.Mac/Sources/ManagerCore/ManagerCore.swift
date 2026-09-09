@@ -25,13 +25,35 @@ public struct ManagerSettings: Codable, Equatable, Sendable {
     public var tunnelMode: TunnelMode
     public var hostname: String
     public var restartOnFailure: Bool
+    public var autoStartServices: Bool
 
     public init(repository: String, workspaceRoot: String, allowedRoot: String, nodePath: String,
                 port: Int = 8787, accessProfile: AccessProfile = .planning,
-                tunnelMode: TunnelMode = .none, hostname: String = "", restartOnFailure: Bool = false) {
+                tunnelMode: TunnelMode = .none, hostname: String = "", restartOnFailure: Bool = false,
+                autoStartServices: Bool = false) {
         self.repository = repository; self.workspaceRoot = workspaceRoot; self.allowedRoot = allowedRoot
         self.nodePath = nodePath; self.port = port; self.accessProfile = accessProfile
         self.tunnelMode = tunnelMode; self.hostname = hostname; self.restartOnFailure = restartOnFailure
+        self.autoStartServices = autoStartServices
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case repository, workspaceRoot, allowedRoot, nodePath, port, accessProfile
+        case tunnelMode, hostname, restartOnFailure, autoStartServices
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        repository = try values.decode(String.self, forKey: .repository)
+        workspaceRoot = try values.decode(String.self, forKey: .workspaceRoot)
+        allowedRoot = try values.decode(String.self, forKey: .allowedRoot)
+        nodePath = try values.decode(String.self, forKey: .nodePath)
+        port = try values.decode(Int.self, forKey: .port)
+        accessProfile = try values.decode(AccessProfile.self, forKey: .accessProfile)
+        tunnelMode = try values.decode(TunnelMode.self, forKey: .tunnelMode)
+        hostname = try values.decode(String.self, forKey: .hostname)
+        restartOnFailure = try values.decode(Bool.self, forKey: .restartOnFailure)
+        autoStartServices = try values.decodeIfPresent(Bool.self, forKey: .autoStartServices) ?? false
     }
 
     public static func defaults(repository: String, nodePath: String) -> ManagerSettings {
@@ -107,10 +129,19 @@ public actor SettingsFileStore {
     private let url: URL
     public init(url: URL) { self.url = url }
     public func load(defaults: ManagerSettings) -> ManagerSettings {
-        guard let data = try? Data(contentsOf: url), let value = try? JSONDecoder().decode(ManagerSettings.self, from: data) else { return defaults }
-        return value
+        Self.loadSynchronously(url: url, defaults: defaults)
     }
     public func save(_ settings: ManagerSettings) throws {
+        try Self.saveSynchronously(settings, url: url)
+    }
+
+    public static func loadSynchronously(url: URL, defaults: ManagerSettings) -> ManagerSettings {
+        guard let data = try? Data(contentsOf: url),
+              let value = try? JSONDecoder().decode(ManagerSettings.self, from: data) else { return defaults }
+        return value
+    }
+
+    public static func saveSynchronously(_ settings: ManagerSettings, url: URL) throws {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)

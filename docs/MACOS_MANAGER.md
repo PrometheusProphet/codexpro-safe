@@ -4,7 +4,7 @@ The macOS Manager is a native SwiftUI menu-bar lifecycle owner for the existing
 cross-platform CodexPro-Safe connector. It is an additive peer to the Windows
 Manager; it does not replace or weaken the Windows implementation.
 
-## Phase 4 boundary
+## Phase 4.5 boundary
 
 The first implementation provides direct shell-free connector launch, Safe
 access profiles, process-group stop/restart, loopback authenticated health
@@ -41,6 +41,17 @@ the Manager reports degraded status and leaves the external process stopped;
 correct the setting and choose **Start All** to retry. Unrelated listeners and
 process groups remain untouched.
 
+Phase 4.5 closes the local daily-driver gap. Saved settings now load before the
+UI is published, existing Phase 4 settings migrate with automatic startup off,
+and directory pickers provide a bounded first-run path. **Start connector when
+Manager opens** is separate from **Launch Manager at login**; both are opt-in.
+When automatic startup is enabled, the Manager starts only its local connector,
+refuses an occupied port, restarts after an unexpected connector exit only when
+recovery is selected, and rechecks authenticated health after system wake. A
+development installer copies the verified app into `~/Applications`, initializes
+only missing settings with the Planning profile, preserves existing settings,
+and does not register a login item.
+
 Codex diagnostic read and maintenance filesystem features remain unavailable
 and effectively off. Do not add the home directory, `~/.codex`, generic runtime
 reads, or a substitute helper until a separate macOS-native trust proof passes
@@ -60,6 +71,7 @@ npm run manager:mac:build
 npm run manager:mac:package
 npm run manager:mac:verify-bundle
 npm run manager:mac:test-takeover
+npm run manager:mac:test-autostart
 ```
 
 Packaging writes ignored development artifacts to `artifacts/macos/`: the app,
@@ -78,6 +90,19 @@ The probe preserves an existing enabled or approval-pending registration. When
 no registration exists, it copies a temporary app into `~/Applications`, calls
 the native Service Management API, verifies the resulting status, unregisters,
 confirms `notRegistered`, and removes the temporary copy.
+
+For a user-local development installation on the current Mac:
+
+```bash
+npm run manager:mac:install-development
+npm run manager:mac:verify-installed
+```
+
+This path installs the ad-hoc-signed development app in `~/Applications`,
+initializes missing settings for this checkout and Node executable, and opens the
+menu-bar app. It is not a notarized public installer. Verification briefly
+registers the exact installed app as a login item, confirms its status, then
+unregisters it and leaves the final state `notRegistered`.
 
 For a distribution build, provide the exact Developer ID identities already
 installed in the signing keychain and a `notarytool` Keychain profile:
@@ -111,8 +136,12 @@ an OS sandbox.
 
 ## Remaining gates
 
-- obtain Developer ID Application and Installer identities, notarize the package,
-  inspect the notary log, and test the stapled installer on a clean second Mac;
-- add public-channel readiness and rollback exercises for each tunnel adapter;
-- add a macOS-native diagnostic-helper trust design before enabling diagnostics;
-- complete update, installed-app rollback, and accessibility proof.
+- Phase 5: add public-channel readiness and bounded rollback exercises for each
+  deliberately supported tunnel adapter;
+- Phase 6: obtain Developer ID Application and Installer identities, notarize the
+  package, inspect the notary log, and prove clean-Mac install, update, rollback,
+  and removal;
+- Phase 7: design and prove a macOS-native diagnostic-helper trust boundary before
+  enabling fixed-root diagnostic reads;
+- Phase 8: complete accessibility, sleep/wake hardware, reboot, prolonged recovery,
+  sanitized operations, and release-readiness proof.

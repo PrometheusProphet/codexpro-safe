@@ -379,8 +379,11 @@ Development artifacts are ad-hoc signed by default; public distribution still
 requires Developer ID signing and Apple notarization. Phase 4 adds confirmed,
 fail-closed takeover of an exact matching local connector with process identity
 revalidation, mismatch preservation, endpoint shutdown proof, and Manager-owned
-relaunch. Its native diagnostic profile remains off until a separate macOS
-trust boundary is implemented and reviewed.
+relaunch. Phase 4.5 adds synchronous settings initialization, first-run directory
+selection, opt-in connector auto-start, wake recovery, unexpected-exit recovery
+proof, and a reversible user-local development installation. Its native
+diagnostic profile remains off until a separate macOS trust boundary is
+implemented and reviewed.
 
 If `cloudflared` is missing, install it yourself, pass `--cloudflared <path>`, or explicitly run:
 

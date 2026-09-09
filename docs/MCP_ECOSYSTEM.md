@@ -21,7 +21,7 @@ Verify that snapshot read-only before using it as operational evidence.
 | Codex Plugins | Lifecycle and registration of plugin-provided MCPs | Ordinary local MCP containers or CodexPro-Safe's local connector process |
 | ToolHive | Candidate general runtime for ordinary local MCPs: discovery, isolated workload lifecycle, local proxy endpoints, secrets injection, policy, health, and logs | Plugin-provided MCP lifecycle or the specialized CodexPro-Safe connector-plus-tunnel pair |
 | CodexPro-Safe | Safe local connector exposing bounded repository inspection and handoff workflows | General installation or routing of every MCP |
-| CodexPro-Safe Manager | Platform-specific lifecycle owner for the CodexPro-Safe connector and its selected tunnel adapter; Windows is installed/operational and macOS is source-built/in development | Replacing Codex Plugins or silently taking over arbitrary MCP processes |
+| CodexPro-Safe Manager | Platform-specific lifecycle owner for the CodexPro-Safe connector and its selected tunnel adapter; Windows is installed/operational and macOS has a user-local development installer but remains pre-release | Replacing Codex Plugins or silently taking over arbitrary MCP processes |
 | OpenAI tunnel client | Deliberate remote publication of a selected local HTTP or stdio MCP target and authenticated channel state | Package installation, general MCP discovery, or machine-wide lifecycle management |
 | Individual MCP server | Its own tool contract, command/image, dependencies, minimum secrets, mounts, network access, and health behavior | Global client configuration or unrelated MCP credentials |
 
