@@ -111,6 +111,9 @@ jobs:
       - name: Verify repeated recovery and short soak
         run: npm run manager:mac:test-soak
 
+      - name: Verify macOS Manager accessibility contract
+        run: npm run manager:mac:test-accessibility-contract
+
       - name: Verify development installation lifecycle
         run: |
           CODEXPRO_MAC_OPEN_AFTER_INSTALL=0 npm run manager:mac:install-development

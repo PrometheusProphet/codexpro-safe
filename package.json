@@ -94,6 +94,7 @@
     "manager:mac:test-soak": "CODEXPRO_MAC_RECOVERY_CYCLES=3 CODEXPRO_MAC_SOAK_SECONDS=20 node scripts/macos-manager-secure-tunnel-smoke.mjs",
     "manager:mac:release-readiness": "bash scripts/macos-manager-release-readiness.sh",
     "manager:mac:certify-live": "node scripts/macos-manager-live-certification.mjs",
+    "manager:mac:test-accessibility-contract": "node scripts/macos-manager-accessibility-contract.test.mjs",
     "manager:mac:install-development": "bash scripts/install-macos-manager-development.sh",
     "manager:mac:verify-installed": "bash scripts/verify-macos-manager-installed.sh",
     "doctor": "node scripts/codexpro.mjs doctor",

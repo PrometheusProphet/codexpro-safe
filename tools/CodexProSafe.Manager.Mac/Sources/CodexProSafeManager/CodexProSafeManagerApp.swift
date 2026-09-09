@@ -577,6 +577,8 @@ struct ManagerMenu: View {
         Button("Stop All") { model.stop() }.disabled(model.state == .stopped)
             .accessibilityIdentifier("stop-all")
         Button("Take Over Existing…") { model.prepareTakeover() }
+            .accessibilityIdentifier("takeover-existing")
+            .accessibilityHint("Verifies an exact external connector before offering a destructive takeover confirmation.")
             .disabled(model.state == .starting || model.state == .ready || model.state == .stopping)
             .confirmationDialog(
                 "Take control of existing CodexPro-Safe connector?",
@@ -584,15 +586,19 @@ struct ManagerMenu: View {
                 titleVisibility: .visible
             ) {
                 Button("Stop Verified Process and Restart", role: .destructive) { model.confirmTakeover() }
+                    .accessibilityIdentifier("takeover-confirm")
                 Button("Cancel", role: .cancel) { model.cancelTakeover() }
+                    .accessibilityIdentifier("takeover-cancel")
             } message: {
                 if let plan = model.pendingTakeover {
                     Text("The listener PID \(plan.listener.pid) and owner PID \(plan.owner.pid) exactly match the saved executable, roots, access profile, arguments, and isolated process group. Identity is checked again before any signal is sent.")
                 }
             }
         SettingsLink { Text("Settings…") }
+            .accessibilityIdentifier("settings-link")
         Divider()
         Button("Quit") { model.quit() }
+            .accessibilityIdentifier("quit-manager")
     }
 }
 
@@ -602,7 +608,7 @@ struct SettingsView: View {
     @State private var controlPlaneKey = ""
     var body: some View {
         Form {
-            directoryField("Repository", path: $model.settings.repository) { selected in
+            directoryField("Repository", identifier: "repository", path: $model.settings.repository) { selected in
                 let previousRepository = model.settings.repository
                 model.settings.repository = selected
                 if model.settings.workspaceRoot == previousRepository { model.settings.workspaceRoot = selected }
@@ -610,40 +616,58 @@ struct SettingsView: View {
                     model.settings.allowedRoot = URL(fileURLWithPath: selected).deletingLastPathComponent().path
                 }
             }
-            directoryField("Workspace root", path: $model.settings.workspaceRoot) { model.settings.workspaceRoot = $0 }
-            directoryField("Allowed root", path: $model.settings.allowedRoot) { model.settings.allowedRoot = $0 }
+            directoryField("Workspace root", identifier: "workspace-root", path: $model.settings.workspaceRoot) { model.settings.workspaceRoot = $0 }
+            directoryField("Allowed root", identifier: "allowed-root", path: $model.settings.allowedRoot) { model.settings.allowedRoot = $0 }
             TextField("Node.js", text: $model.settings.nodePath)
+                .accessibilityIdentifier("node-path")
             TextField("Port", value: $model.settings.port, format: .number)
+                .accessibilityIdentifier("connector-port")
             Picker("Access", selection: $model.settings.accessProfile) {
                 ForEach(AccessProfile.allCases, id: \.self) { Text($0.rawValue.capitalized) }
             }
+            .accessibilityIdentifier("access-profile")
             .accessibilityHint("Planning is the safest default; broader profiles are explicit.")
             Picker("Tunnel", selection: $model.settings.tunnelMode) {
                 Text("Local only").tag(TunnelMode.none)
                 Text("OpenAI Secure MCP Tunnel").tag(TunnelMode.openAI)
             }
+            .accessibilityIdentifier("tunnel-mode")
             .accessibilityHint("Local only is the default. Secure tunnel is outbound and requires separate credentials.")
             if model.settings.tunnelMode == .openAI {
-                fileField("Tunnel client", path: $model.settings.tunnelClientPath)
+                fileField("Tunnel client", identifier: "tunnel-client", path: $model.settings.tunnelClientPath)
                 TextField("Tunnel profile", text: $model.settings.tunnelProfile)
+                    .accessibilityIdentifier("tunnel-profile")
                 TextField("Tunnel health port", value: $model.settings.tunnelHealthPort, format: .number)
+                    .accessibilityIdentifier("tunnel-health-port")
                 TextField("Organization ID (optional)", text: $model.settings.organizationID)
+                    .accessibilityIdentifier("organization-id")
                 SecureField("OpenAI runtime API key", text: $controlPlaneKey)
+                    .accessibilityIdentifier("openai-runtime-key")
+                    .accessibilityHint("The value is stored in the current user's Keychain and cleared from this field after saving.")
                 Button("Save OpenAI Runtime Key") {
                     model.saveControlPlaneKey(controlPlaneKey)
                     controlPlaneKey = ""
                 }
+                .accessibilityIdentifier("save-openai-runtime-key")
             }
             SecureField("Connector bearer token", text: $token)
+                .accessibilityIdentifier("connector-bearer-token")
+                .accessibilityHint("The value is stored in the current user's Keychain and cleared from this field after saving.")
             Toggle("Restart after unexpected exit", isOn: $model.settings.restartOnFailure)
+                .accessibilityIdentifier("restart-on-failure")
             Toggle("Start connector when Manager opens", isOn: $model.settings.autoStartServices)
+                .accessibilityIdentifier("auto-start-services")
             Toggle("Launch Manager at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+                .accessibilityIdentifier("launch-at-login")
             HStack {
                 Button("Save Settings") { model.save() }
+                    .accessibilityIdentifier("save-settings")
                 Button("Save Connector Token") { model.saveToken(token); token = "" }
+                    .accessibilityIdentifier("save-connector-token")
             }
             Text("Secure tunneling is outbound-only and opt-in. Readiness requires exact profile identity plus an authenticated healthy main channel.").foregroundStyle(.secondary)
             LabeledContent("Native diagnostic helper", value: model.diagnosticHelperState)
+                .accessibilityIdentifier("diagnostic-helper-status")
             Text("Codex diagnostics remain off until authenticated Manager-to-connector launch proof is enabled.").foregroundStyle(.secondary)
             Text(model.status).foregroundStyle(.secondary)
                 .accessibilityLabel("Settings status")
@@ -654,9 +678,10 @@ struct SettingsView: View {
         .frame(width: 620)
     }
 
-    private func directoryField(_ label: String, path: Binding<String>, onSelect: @escaping (String) -> Void) -> some View {
+    private func directoryField(_ label: String, identifier: String, path: Binding<String>, onSelect: @escaping (String) -> Void) -> some View {
         HStack {
             TextField(label, text: path)
+                .accessibilityIdentifier("\(identifier)-field")
             Button("Choose…") {
                 let panel = NSOpenPanel()
                 panel.title = "Choose \(label)"
@@ -670,12 +695,15 @@ struct SettingsView: View {
                     onSelect(selected.resolvingSymlinksInPath().standardizedFileURL.path)
                 }
             }
+            .accessibilityLabel("Choose \(label)")
+            .accessibilityIdentifier("\(identifier)-choose")
         }
     }
 
-    private func fileField(_ label: String, path: Binding<String>) -> some View {
+    private func fileField(_ label: String, identifier: String, path: Binding<String>) -> some View {
         HStack {
             TextField(label, text: path)
+                .accessibilityIdentifier("\(identifier)-field")
             Button("Choose…") {
                 let panel = NSOpenPanel()
                 panel.title = "Choose \(label)"
@@ -686,6 +714,8 @@ struct SettingsView: View {
                     path.wrappedValue = selected.resolvingSymlinksInPath().standardizedFileURL.path
                 }
             }
+            .accessibilityLabel("Choose \(label)")
+            .accessibilityIdentifier("\(identifier)-choose")
         }
     }
 }

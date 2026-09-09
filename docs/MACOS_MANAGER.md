@@ -275,6 +275,13 @@ changes network, startup, process, app, or credential state itself. A remote
 ChatGPT/Codex tool call and VoiceOver traversal remain separate manual evidence;
 the local runner does not claim either one.
 
+CI separately locks stable accessibility identifiers for status, lifecycle,
+takeover/confirmation, Settings navigation, Safe profile, tunnel, credential,
+startup, save, picker, and diagnostic-helper controls. It also locks the Safe
+profile, local-only, Keychain, and takeover hints. This prevents accidental
+regression of the surface that VoiceOver and keyboard testing exercises, but it
+does not substitute for the physical traversal.
+
 Set `CODEXPRO_MAC_CERTIFY_RELEASE=1` only when the Developer ID and notary
 environment names are configured; that adds the Apple credential preflight.
 The script intentionally distinguishes passing engineering gates from external
