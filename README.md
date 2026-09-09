@@ -373,8 +373,12 @@ On macOS 14 or newer, the source-built
 [CodexPro-Safe Manager for macOS](docs/MACOS_MANAGER.md) provides a native
 SwiftUI menu-bar foundation with Safe access profiles, Keychain token storage,
 process-group lifecycle ownership, authenticated loopback health checks, and a
-real MCP tool-call smoke gate. Its native diagnostic profile remains off until
-a separate macOS trust boundary is implemented and reviewed.
+real MCP tool-call smoke gate. Phase 3 also provides reproducible universal app,
+ZIP, and installer packaging with hardened-runtime and Launch at Login proof.
+Development artifacts are ad-hoc signed by default; public distribution still
+requires Developer ID signing and Apple notarization. Its native diagnostic
+profile remains off until a separate macOS trust boundary is implemented and
+reviewed.
 
 If `cloudflared` is missing, install it yourself, pass `--cloudflared <path>`, or explicitly run:
 

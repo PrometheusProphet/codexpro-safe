@@ -89,3 +89,9 @@ jobs:
 
       - name: Verify macOS Manager lifecycle
         run: npm run manager:mac:smoke
+
+      - name: Package universal macOS Manager
+        run: npm run manager:mac:package
+
+      - name: Verify macOS Manager bundle
+        run: npm run manager:mac:verify-bundle

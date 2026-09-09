@@ -263,9 +263,50 @@ struct SettingsView: View {
     }
 }
 
+enum LoginItemCommand {
+    static func runIfRequested() -> Never? {
+        let arguments = Set(CommandLine.arguments.dropFirst())
+        do {
+            if arguments.contains("--login-item-status") {
+                print(statusName(SMAppService.mainApp.status))
+                exit(0)
+            }
+            if arguments.contains("--login-item-register") {
+                try SMAppService.mainApp.register()
+                print(statusName(SMAppService.mainApp.status))
+                exit(0)
+            }
+            if arguments.contains("--login-item-unregister") {
+                try SMAppService.mainApp.unregister()
+                print(statusName(SMAppService.mainApp.status))
+                exit(0)
+            }
+        } catch {
+            FileHandle.standardError.write(Data("Login-item operation failed: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+        return nil
+    }
+
+    private static func statusName(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .notRegistered: return "notRegistered"
+        case .enabled: return "enabled"
+        case .requiresApproval: return "requiresApproval"
+        case .notFound: return "notFound"
+        @unknown default: return "unknown"
+        }
+    }
+}
+
 @main
 struct CodexProSafeManagerApp: App {
-    @StateObject private var model = ManagerModel()
+    @StateObject private var model: ManagerModel
+
+    init() {
+        _ = LoginItemCommand.runIfRequested()
+        _model = StateObject(wrappedValue: ManagerModel())
+    }
     var body: some Scene {
         MenuBarExtra("CodexPro-Safe Manager", systemImage: model.state == .ready ? "checkmark.shield.fill" : "shield") {
             ManagerMenu().environmentObject(model)
