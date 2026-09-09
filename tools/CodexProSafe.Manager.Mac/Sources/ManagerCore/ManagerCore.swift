@@ -13,7 +13,10 @@ public enum AccessProfile: String, Codable, CaseIterable, Sendable {
     }
 }
 
-public enum TunnelMode: String, Codable, CaseIterable, Sendable { case none }
+public enum TunnelMode: String, Codable, CaseIterable, Sendable {
+    case none
+    case openAI = "openai-secure"
+}
 
 public struct ManagerSettings: Codable, Equatable, Sendable {
     public var repository: String
@@ -26,20 +29,29 @@ public struct ManagerSettings: Codable, Equatable, Sendable {
     public var hostname: String
     public var restartOnFailure: Bool
     public var autoStartServices: Bool
+    public var tunnelClientPath: String
+    public var tunnelProfile: String
+    public var tunnelHealthPort: Int
+    public var organizationID: String
 
     public init(repository: String, workspaceRoot: String, allowedRoot: String, nodePath: String,
                 port: Int = 8787, accessProfile: AccessProfile = .planning,
                 tunnelMode: TunnelMode = .none, hostname: String = "", restartOnFailure: Bool = false,
-                autoStartServices: Bool = false) {
+                autoStartServices: Bool = false, tunnelClientPath: String = "",
+                tunnelProfile: String = "codexpro-safe-local", tunnelHealthPort: Int = 8080,
+                organizationID: String = "") {
         self.repository = repository; self.workspaceRoot = workspaceRoot; self.allowedRoot = allowedRoot
         self.nodePath = nodePath; self.port = port; self.accessProfile = accessProfile
         self.tunnelMode = tunnelMode; self.hostname = hostname; self.restartOnFailure = restartOnFailure
         self.autoStartServices = autoStartServices
+        self.tunnelClientPath = tunnelClientPath; self.tunnelProfile = tunnelProfile
+        self.tunnelHealthPort = tunnelHealthPort; self.organizationID = organizationID
     }
 
     private enum CodingKeys: String, CodingKey {
         case repository, workspaceRoot, allowedRoot, nodePath, port, accessProfile
         case tunnelMode, hostname, restartOnFailure, autoStartServices
+        case tunnelClientPath, tunnelProfile, tunnelHealthPort, organizationID
     }
 
     public init(from decoder: Decoder) throws {
@@ -54,6 +66,10 @@ public struct ManagerSettings: Codable, Equatable, Sendable {
         hostname = try values.decode(String.self, forKey: .hostname)
         restartOnFailure = try values.decode(Bool.self, forKey: .restartOnFailure)
         autoStartServices = try values.decodeIfPresent(Bool.self, forKey: .autoStartServices) ?? false
+        tunnelClientPath = try values.decodeIfPresent(String.self, forKey: .tunnelClientPath) ?? ""
+        tunnelProfile = try values.decodeIfPresent(String.self, forKey: .tunnelProfile) ?? "codexpro-safe-local"
+        tunnelHealthPort = try values.decodeIfPresent(Int.self, forKey: .tunnelHealthPort) ?? 8080
+        organizationID = try values.decodeIfPresent(String.self, forKey: .organizationID) ?? ""
     }
 
     public static func defaults(repository: String, nodePath: String) -> ManagerSettings {
@@ -75,19 +91,87 @@ public struct ManagerSettings: Codable, Equatable, Sendable {
         var copy = self
         copy.repository = repository; copy.workspaceRoot = workspace; copy.allowedRoot = allowed; copy.nodePath = node
         copy.hostname = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
+        copy.tunnelClientPath = NSString(string: tunnelClientPath).expandingTildeInPath
+        copy.tunnelProfile = tunnelProfile.trimmingCharacters(in: .whitespacesAndNewlines)
+        copy.organizationID = organizationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if copy.tunnelMode == .openAI {
+            guard fileManager.isExecutableFile(atPath: copy.tunnelClientPath) else {
+                throw ManagerError.invalid("OpenAI tunnel-client is not executable.")
+            }
+            guard copy.tunnelProfile.range(of: #"^[A-Za-z0-9_.-]{1,100}$"#, options: .regularExpression) != nil else {
+                throw ManagerError.invalid("Tunnel profile must use 1–100 letters, numbers, dots, underscores, or hyphens.")
+            }
+            guard (1...65535).contains(copy.tunnelHealthPort), copy.tunnelHealthPort != copy.port else {
+                throw ManagerError.invalid("Tunnel health port must be valid and different from the connector port.")
+            }
+            if !copy.organizationID.isEmpty,
+               copy.organizationID.range(of: #"^org-[A-Za-z0-9_-]+$"#, options: .regularExpression) == nil {
+                throw ManagerError.invalid("Organization ID must be empty or start with org-.")
+            }
+        }
         return copy
     }
 
     public func launcherArguments() -> [String] {
         var result = [URL(fileURLWithPath: repository).appendingPathComponent("scripts/codexpro.mjs").path,
                       "start", "--root", workspaceRoot, "--allow-root", allowedRoot,
-                      "--port", String(port), "--tunnel", tunnelMode.rawValue,
+                      "--port", String(port), "--tunnel", TunnelMode.none.rawValue,
                       "--no-copy-url", "--codex-diagnostic-read", "off"]
         result.append(contentsOf: accessProfile.launchArguments)
         return result
     }
 
     public var localHealthURL: URL { URL(string: "http://127.0.0.1:\(port)/healthz")! }
+    public var tunnelHealthURL: URL { URL(string: "http://127.0.0.1:\(tunnelHealthPort)/healthz")! }
+    public var tunnelReadyURL: URL { URL(string: "http://127.0.0.1:\(tunnelHealthPort)/readyz")! }
+    public var tunnelStatusURL: URL { URL(string: "http://127.0.0.1:\(tunnelHealthPort)/api/status")! }
+    public var tunnelArguments: [String] { ["run", "--profile", tunnelProfile] }
+}
+
+public struct TunnelStatusDocument: Decodable, Sendable {
+    public struct Metadata: Decodable, Sendable { public let ID: String }
+    public struct Channel: Decodable, Sendable {
+        public let name: String
+        public let probe_status: String
+    }
+    public let control_plane_tunnel_id: String
+    public let tunnel_metadata: Metadata
+    public let channels: [Channel]
+}
+
+public enum TunnelReadiness {
+    public static func matches(statusData: Data, expectedTunnelID: String) -> Bool {
+        guard statusData.count <= 524_288,
+              let status = try? JSONDecoder().decode(TunnelStatusDocument.self, from: statusData),
+              !expectedTunnelID.isEmpty,
+              !status.tunnel_metadata.ID.isEmpty,
+              status.control_plane_tunnel_id == status.tunnel_metadata.ID,
+              expectedTunnelID == status.tunnel_metadata.ID else { return false }
+        return status.channels.contains { $0.name == "main" && $0.probe_status.lowercased() == "ok" }
+    }
+
+    public static func expectedTunnelID(profile: String, environment: [String: String] = ProcessInfo.processInfo.environment,
+                                        fileManager: FileManager = .default) -> String? {
+        guard profile.range(of: #"^[A-Za-z0-9_.-]{1,100}$"#, options: .regularExpression) != nil else { return nil }
+        let directory: String
+        if let override = environment["TUNNEL_CLIENT_PROFILE_DIR"], !override.isEmpty {
+            directory = NSString(string: override).expandingTildeInPath
+        } else if let xdg = environment["XDG_CONFIG_HOME"], !xdg.isEmpty {
+            directory = URL(fileURLWithPath: NSString(string: xdg).expandingTildeInPath)
+                .appendingPathComponent("tunnel-client").path
+        } else {
+            directory = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".config/tunnel-client").path
+        }
+        let url = URL(fileURLWithPath: directory).appendingPathComponent("\(profile).yaml")
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber, size.intValue <= 65_536,
+              let content = try? String(contentsOf: url, encoding: .utf8),
+              let regex = try? NSRegularExpression(pattern: #"(?m)^\s*tunnel_id\s*:\s*[\"']?(tunnel_[A-Za-z0-9]+)[\"']?\s*$"#),
+              let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),
+              let range = Range(match.range(at: 1), in: content) else { return nil }
+        return String(content[range])
+    }
 }
 
 public enum ManagerError: LocalizedError, Equatable {

@@ -4,7 +4,7 @@ The macOS Manager is a native SwiftUI menu-bar lifecycle owner for the existing
 cross-platform CodexPro-Safe connector. It is an additive peer to the Windows
 Manager; it does not replace or weaken the Windows implementation.
 
-## Phase 4.5 boundary
+## Phase 5 boundary
 
 The first implementation provides direct shell-free connector launch, Safe
 access profiles, process-group stop/restart, loopback authenticated health
@@ -57,11 +57,34 @@ and effectively off. Do not add the home directory, `~/.codex`, generic runtime
 reads, or a substitute helper until a separate macOS-native trust proof passes
 its own security review.
 
-This first Manager slice is intentionally local-only. A listening process or
-port alone is not reported as ready; the Manager requires an HTTP 200 from the
-connector's loopback `/healthz` endpoint, including bearer authentication when
-a Keychain token is configured. Public tunnel selection will remain unavailable
-until each adapter has separate public-channel readiness and rollback proof.
+Local-only remains the default. A listening process or port alone is not
+reported as ready; the Manager requires an HTTP 200 from the connector's
+loopback `/healthz` endpoint, including bearer authentication when a Keychain
+token is configured.
+
+Phase 5 adds one deliberate remote adapter: **OpenAI Secure MCP Tunnel**. This is
+an outbound-only private connection to OpenAI, not a public inbound tunnel. The
+Manager does not create OpenAI tunnels, API keys, or local profiles. It accepts
+an explicitly selected `tunnel-client` executable and safe profile name, stores
+the runtime API key only in the user's Keychain, runs a bounded `doctor` check,
+and starts the client in its own verified process group only after the local
+connector is healthy. The connector continues to bind loopback and is always
+launched with `--tunnel none`.
+
+Tunnel readiness requires all of the following independently:
+
+- loopback `/healthz` and `/readyz` return HTTP 200;
+- bounded `/api/status` JSON identifies the same non-empty tunnel in both the
+  control-plane and tunnel metadata fields;
+- that identity exactly matches `tunnel_id` in the selected local profile;
+- the `main` channel reports `probe_status: ok`.
+
+Shutdown signals the tunnel group before the connector group. An unexpected
+tunnel exit may restart only the tunnel while the local connector stays
+available. Connector exit stops its dependent tunnel before bounded recovery.
+Occupied tunnel health ports are refused and external tunnel processes are
+never taken over. Failure of `doctor` or authenticated readiness leaves the
+connector local and reports degraded status.
 
 ## Build and test
 
@@ -72,7 +95,41 @@ npm run manager:mac:package
 npm run manager:mac:verify-bundle
 npm run manager:mac:test-takeover
 npm run manager:mac:test-autostart
+npm run manager:mac:test-secure-tunnel
 ```
+
+The secure-tunnel smoke uses a synthetic control plane and never contacts
+OpenAI. It proves ordered dual-process lifecycle, exact authenticated-status
+matching, independent tunnel crash recovery, and a real local MCP tool call.
+A release-readiness record must additionally include a live tunnel and real
+remote tool call; an open port or the synthetic gate alone is insufficient.
+
+## Configure OpenAI Secure MCP Tunnel
+
+Create the endpoint in [OpenAI Platform tunnel settings](https://platform.openai.com/settings/organization/tunnels)
+and download `tunnel-client` from the latest official
+[OpenAI release](https://github.com/openai/tunnel-client/releases/latest).
+The runtime principal needs Tunnels Read + Use; creating or editing the endpoint
+also needs Tunnels Read + Manage. Initialize a local HTTP profile while the
+connector is intended to run on loopback:
+
+```bash
+tunnel-client init \
+  --profile codexpro-safe-local \
+  --tunnel-id tunnel_REPLACE_WITH_YOURS \
+  --mcp-server-url http://127.0.0.1:8787/mcp \
+  --health-listen-addr 127.0.0.1:8080
+tunnel-client doctor --profile codexpro-safe-local --explain
+```
+
+In Manager Settings, select **OpenAI Secure MCP Tunnel**, choose the exact
+client binary, enter the profile and health port, optionally enter the owning
+`org-...` ID, and save the runtime key using **Save OpenAI Runtime Key**. Saving
+settings or selecting the mode does not start services. **Start All** starts the
+local connector first, then the tunnel after the checks above. Changing tunnel
+identity interrupts remote MCP sessions; stop the Manager, initialize or update
+the profile, save settings, and start again. Roll back by selecting **Local
+only** and restarting; this leaves the OpenAI endpoint and profile untouched.
 
 Packaging writes ignored development artifacts to `artifacts/macos/`: the app,
 a ZIP archive, a SHA-256 checksum manifest, and a component package that installs
@@ -136,8 +193,6 @@ an OS sandbox.
 
 ## Remaining gates
 
-- Phase 5: add public-channel readiness and bounded rollback exercises for each
-  deliberately supported tunnel adapter;
 - Phase 6: obtain Developer ID Application and Installer identities, notarize the
   package, inspect the notary log, and prove clean-Mac install, update, rollback,
   and removal;

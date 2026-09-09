@@ -88,6 +88,7 @@
     "manager:mac:test-login-item": "bash scripts/macos-manager-login-item-smoke.sh",
     "manager:mac:test-takeover": "node scripts/macos-manager-takeover-smoke.mjs",
     "manager:mac:test-autostart": "node scripts/macos-manager-autostart-smoke.mjs",
+    "manager:mac:test-secure-tunnel": "node scripts/macos-manager-secure-tunnel-smoke.mjs",
     "manager:mac:install-development": "bash scripts/install-macos-manager-development.sh",
     "manager:mac:verify-installed": "bash scripts/verify-macos-manager-installed.sh",
     "doctor": "node scripts/codexpro.mjs doctor",

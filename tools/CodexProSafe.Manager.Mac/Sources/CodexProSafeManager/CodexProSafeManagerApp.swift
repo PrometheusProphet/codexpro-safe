@@ -15,9 +15,12 @@ final class ManagerModel: NSObject, ObservableObject {
     @Published var launchAtLogin = false
     @Published var pendingTakeover: ExternalConnectorPlan?
     @Published var showingTakeoverConfirmation = false
-    private var process: Process?
+    private var connectorProcess: Process?
+    private var tunnelProcess: Process?
     private var healthTask: Task<Void, Never>?
     private var intentionalStop = false
+    private var restartRequested = false
+    private var suppressNextTunnelRecovery = false
     private var wakeObserver: NSObjectProtocol?
     private let store: SettingsFileStore
 
@@ -64,63 +67,44 @@ final class ManagerModel: NSObject, ObservableObject {
     }
 
     func start() {
-        guard process == nil else { return }
+        guard connectorProcess == nil, tunnelProcess == nil else { return }
         do {
             let checked = try settings.validated()
-            let token = try KeychainTokenStore.read()
+            let token = try KeychainTokenStore.read(account: .httpToken)
             if try ExternalConnectorInspector.loopbackListenerIsPresent(port: checked.port) {
                 throw ManagerError.invalid("The configured loopback port is already in use. Use Take Over Existing; mismatched processes will be refused.")
             }
+            if checked.tunnelMode == .openAI,
+               try ExternalConnectorInspector.loopbackListenerIsPresent(port: checked.tunnelHealthPort) {
+                throw ManagerError.invalid("The configured tunnel health port is already in use. No external tunnel was changed.")
+            }
             settings = checked
             intentionalStop = false
+            restartRequested = false
             state = .starting
             status = "Starting connector"
-            let child = Process()
-            guard let managerExecutable = Bundle.main.executableURL else {
-                throw ManagerError.invalid("Manager executable location is unavailable.")
-            }
-            let launcher = managerExecutable.deletingLastPathComponent().appendingPathComponent("CodexProSafeLauncher")
-            guard FileManager.default.isExecutableFile(atPath: launcher.path) else {
-                throw ManagerError.invalid("Trusted process launcher is missing beside the Manager.")
-            }
-            child.executableURL = launcher
-            child.arguments = [checked.nodePath] + checked.launcherArguments()
             var environment = ProcessInfo.processInfo.environment
             if !token.isEmpty { environment["CODEXPRO_HTTP_TOKEN"] = token }
             environment["NO_COLOR"] = "1"
-            child.environment = environment
-            child.currentDirectoryURL = URL(fileURLWithPath: checked.repository)
-            let output = Pipe()
-            child.standardOutput = output
-            child.standardError = output
-            output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-                let text = String(decoding: handle.availableData, as: UTF8.self)
-                Task { @MainActor in self?.append(text) }
-            }
-            child.terminationHandler = { [weak self] terminated in
-                let code = terminated.terminationStatus
-                Task { @MainActor in self?.didExit(code: code) }
-            }
-            try child.run()
-            guard verifyProcessGroup(child.processIdentifier) else {
-                child.terminate()
-                throw ManagerError.invalid("Could not isolate the connector process group.")
-            }
-            process = child
-            healthTask = Task { await verifyHealth(checked.localHealthURL, token: token) }
+            connectorProcess = try launchManaged(
+                executable: checked.nodePath,
+                arguments: checked.launcherArguments(),
+                directory: checked.repository,
+                environment: environment,
+                exit: { [weak self] code in self?.connectorDidExit(code: code) }
+            )
+            healthTask = Task { await verifyConnectorHealth(checked, token: token) }
         } catch {
-            process = nil
+            connectorProcess = nil
             state = .degraded
             status = error.localizedDescription
         }
     }
 
     func stop() {
-        guard let child = process else { state = .stopped; status = "Stopped"; return }
-        guard child.isRunning, getpgid(child.processIdentifier) == child.processIdentifier else {
-            healthTask?.cancel()
-            healthTask = nil
-            process = nil
+        guard connectorProcess != nil || tunnelProcess != nil else { state = .stopped; status = "Stopped"; return }
+        let running = [tunnelProcess, connectorProcess].compactMap { $0 }.filter(\.isRunning)
+        guard running.allSatisfy({ getpgid($0.processIdentifier) == $0.processIdentifier }) else {
             state = .degraded
             status = "Process-group ownership could not be verified; no signal was sent"
             return
@@ -128,26 +112,24 @@ final class ManagerModel: NSObject, ObservableObject {
         intentionalStop = true
         state = .stopping
         status = "Stopping services"
-        kill(-child.processIdentifier, SIGTERM)
-        Task {
-            try? await Task.sleep(for: .seconds(2))
-            if child.isRunning, getpgid(child.processIdentifier) == child.processIdentifier {
-                kill(-child.processIdentifier, SIGKILL)
-            }
-        }
+        healthTask?.cancel()
+        healthTask = nil
+        signalOwned(tunnelProcess, signal: SIGTERM)
+        signalOwned(connectorProcess, signal: SIGTERM)
+        forceStopAfterGrace([tunnelProcess, connectorProcess].compactMap { $0 })
     }
 
     func restart() {
+        restartRequested = true
         stop()
-        Task { try? await Task.sleep(for: .seconds(3)); start() }
     }
 
     func prepareTakeover() {
-        guard process == nil else { return }
+        guard connectorProcess == nil, tunnelProcess == nil else { return }
         Task {
             do {
                 let checked = try settings.validated()
-                let token = try KeychainTokenStore.read()
+                let token = try KeychainTokenStore.read(account: .httpToken)
                 guard await healthIsReady(checked.localHealthURL, token: token) else {
                     throw ManagerError.invalid("No authenticated external connector is ready on the configured port.")
                 }
@@ -175,7 +157,7 @@ final class ManagerModel: NSObject, ObservableObject {
         Task {
             do {
                 let checked = try settings.validated()
-                let token = try KeychainTokenStore.read()
+                let token = try KeychainTokenStore.read(account: .httpToken)
                 try await ExternalConnectorInspector.stop(plan: plan, settings: checked)
                 guard await waitForHealthToStop(checked.localHealthURL, token: token) else {
                     throw ManagerError.invalid("External endpoint remained available after the verified process exited.")
@@ -197,7 +179,12 @@ final class ManagerModel: NSObject, ObservableObject {
     }
 
     func saveToken(_ token: String) {
-        do { try KeychainTokenStore.save(token); status = "Token saved in Keychain" }
+        do { try KeychainTokenStore.save(token, account: .httpToken); status = "Connector token saved in Keychain" }
+        catch { status = "Keychain error: \(error.localizedDescription)" }
+    }
+
+    func saveControlPlaneKey(_ key: String) {
+        do { try KeychainTokenStore.save(key, account: .controlPlaneKey); status = "OpenAI runtime key saved in Keychain" }
         catch { status = "Keychain error: \(error.localizedDescription)" }
     }
 
@@ -216,11 +203,22 @@ final class ManagerModel: NSObject, ObservableObject {
         Task {
             do {
                 let checked = try settings.validated()
-                let token = try KeychainTokenStore.read()
-                if let child = process, child.isRunning {
+                let token = try KeychainTokenStore.read(account: .httpToken)
+                if let child = connectorProcess, child.isRunning {
                     if await healthIsReady(checked.localHealthURL, token: token) {
-                        state = .ready
-                        status = token.isEmpty ? "Connector ready after wake" : "Connector ready and authenticated after wake"
+                        if checked.tunnelMode == .openAI {
+                            guard let expectedID = TunnelReadiness.expectedTunnelID(profile: checked.tunnelProfile),
+                                  await tunnelIsReady(checked, expectedTunnelID: expectedID) else {
+                                status = "Secure tunnel unhealthy after wake; restarting services"
+                                restart()
+                                return
+                            }
+                            state = .ready
+                            status = "Connector and authenticated secure tunnel ready after wake"
+                        } else {
+                            state = .ready
+                            status = token.isEmpty ? "Connector ready after wake" : "Connector ready and authenticated after wake"
+                        }
                     } else {
                         status = "Connector unhealthy after wake; restarting"
                         restart()
@@ -238,29 +236,26 @@ final class ManagerModel: NSObject, ObservableObject {
     }
 
     func quit() {
-        guard let child = process, child.isRunning,
-              getpgid(child.processIdentifier) == child.processIdentifier else {
-            NSApplication.shared.terminate(nil)
-            return
-        }
         intentionalStop = true
-        kill(-child.processIdentifier, SIGTERM)
-        for _ in 0..<100 where child.isRunning { usleep(10_000) }
-        if child.isRunning, getpgid(child.processIdentifier) == child.processIdentifier {
-            kill(-child.processIdentifier, SIGKILL)
+        let children = [tunnelProcess, connectorProcess].compactMap { $0 }
+        for child in children { signalOwned(child, signal: SIGTERM) }
+        for _ in 0..<100 where children.contains(where: \.isRunning) { usleep(10_000) }
+        for child in children where child.isRunning {
+            signalOwned(child, signal: SIGKILL)
         }
         NSApplication.shared.terminate(nil)
     }
 
-    private func verifyHealth(_ url: URL, token: String) async {
+    private func verifyConnectorHealth(_ checked: ManagerSettings, token: String) async {
         for _ in 0..<60 {
             if Task.isCancelled { return }
-            var request = URLRequest(url: url, timeoutInterval: 1)
-            if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-            if let (_, response) = try? await URLSession.shared.data(for: request),
-               let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                state = .ready
-                status = token.isEmpty ? "Connector ready" : "Connector ready and authenticated"
+            if await healthIsReady(checked.localHealthURL, token: token) {
+                if checked.tunnelMode == .openAI {
+                    await startTunnel(checked)
+                } else {
+                    state = .ready
+                    status = token.isEmpty ? "Connector ready" : "Connector ready and authenticated"
+                }
                 return
             }
             try? await Task.sleep(for: .milliseconds(250))
@@ -272,7 +267,9 @@ final class ManagerModel: NSObject, ObservableObject {
     private func healthIsReady(_ url: URL, token: String) async -> Bool {
         var request = URLRequest(url: url, timeoutInterval: 1)
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        guard let (_, response) = try? await URLSession.shared.data(for: request),
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldUsePipelining = false
+        guard let (_, response) = try? await URLSession(configuration: configuration).data(for: request),
               let http = response as? HTTPURLResponse else { return false }
         return http.statusCode == 200
     }
@@ -290,14 +287,179 @@ final class ManagerModel: NSObject, ObservableObject {
         if let last = sanitized.last { status = last }
     }
 
-    private func didExit(code: Int32) {
+    private func connectorDidExit(code: Int32) {
         healthTask?.cancel()
         healthTask = nil
-        process = nil
-        if intentionalStop { state = .stopped; status = "Stopped"; return }
+        connectorProcess = nil
+        if tunnelProcess != nil {
+            suppressNextTunnelRecovery = true
+            signalOwned(tunnelProcess, signal: SIGTERM)
+        }
+        if intentionalStop { finishStopIfPossible(); return }
         state = .degraded
         status = "Connector exited (\(code))"
-        if settings.restartOnFailure { Task { try? await Task.sleep(for: .seconds(2)); start() } }
+        if settings.restartOnFailure {
+            restartRequested = true
+            intentionalStop = true
+            finishStopIfPossible()
+        }
+    }
+
+    private func tunnelDidExit(code: Int32) {
+        tunnelProcess = nil
+        if suppressNextTunnelRecovery {
+            suppressNextTunnelRecovery = false
+            if intentionalStop { finishStopIfPossible() }
+            return
+        }
+        if intentionalStop { finishStopIfPossible(); return }
+        state = .degraded
+        status = "Secure tunnel exited (\(code)); local connector remains available"
+        if settings.restartOnFailure, connectorProcess?.isRunning == true {
+            Task { try? await Task.sleep(for: .seconds(2)); await startTunnel(settings) }
+        }
+    }
+
+    private func finishStopIfPossible() {
+        guard connectorProcess == nil, tunnelProcess == nil else { return }
+        state = .stopped
+        status = "Stopped"
+        intentionalStop = false
+        if restartRequested {
+            restartRequested = false
+            Task { try? await Task.sleep(for: .milliseconds(500)); start() }
+        }
+    }
+
+    private func startTunnel(_ checked: ManagerSettings) async {
+        guard tunnelProcess == nil else { return }
+        do {
+            guard let expectedID = TunnelReadiness.expectedTunnelID(profile: checked.tunnelProfile) else {
+                throw ManagerError.invalid("The selected tunnel profile has no valid tunnel_id; local connector remains available.")
+            }
+            let key = try controlPlaneKey()
+            guard !key.isEmpty else {
+                throw ManagerError.invalid("Save an OpenAI runtime API key before starting the secure tunnel; local connector remains available.")
+            }
+            status = "Checking secure tunnel configuration"
+            try await runTunnelDoctor(checked, key: key)
+            var environment = ProcessInfo.processInfo.environment
+            environment["CONTROL_PLANE_API_KEY"] = key
+            environment["HEALTH_LISTEN_ADDR"] = "127.0.0.1:\(checked.tunnelHealthPort)"
+            environment["ALLOW_REMOTE_UI"] = "false"
+            environment["OPEN_WEB_UI"] = "false"
+            environment["NO_COLOR"] = "1"
+            if !checked.organizationID.isEmpty { environment["CONTROL_PLANE_ORGANIZATION_ID"] = checked.organizationID }
+            status = "Starting OpenAI secure tunnel"
+            tunnelProcess = try launchManaged(
+                executable: checked.tunnelClientPath,
+                arguments: checked.tunnelArguments,
+                directory: checked.repository,
+                environment: environment,
+                exit: { [weak self] code in self?.tunnelDidExit(code: code) }
+            )
+            for _ in 0..<120 {
+                if Task.isCancelled { return }
+                if await tunnelIsReady(checked, expectedTunnelID: expectedID) {
+                    state = .ready
+                    status = "Connector and authenticated OpenAI secure tunnel ready"
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+            suppressNextTunnelRecovery = true
+            signalOwned(tunnelProcess, signal: SIGTERM)
+            throw ManagerError.invalid("Secure tunnel authenticated readiness timed out; local connector remains available.")
+        } catch {
+            state = .degraded
+            status = error.localizedDescription
+        }
+    }
+
+    private func runTunnelDoctor(_ checked: ManagerSettings, key: String) async throws {
+        let doctor = Process()
+        doctor.executableURL = URL(fileURLWithPath: checked.tunnelClientPath)
+        doctor.arguments = ["doctor", "--profile", checked.tunnelProfile, "--explain", "--json"]
+        var environment = ProcessInfo.processInfo.environment
+        environment["CONTROL_PLANE_API_KEY"] = key
+        environment["HEALTH_LISTEN_ADDR"] = "127.0.0.1:\(checked.tunnelHealthPort)"
+        environment["NO_COLOR"] = "1"
+        if !checked.organizationID.isEmpty { environment["CONTROL_PLANE_ORGANIZATION_ID"] = checked.organizationID }
+        doctor.environment = environment
+        doctor.standardOutput = FileHandle.nullDevice
+        doctor.standardError = FileHandle.nullDevice
+        try doctor.run()
+        for _ in 0..<120 where doctor.isRunning { try? await Task.sleep(for: .milliseconds(250)) }
+        if doctor.isRunning { doctor.terminate(); throw ManagerError.invalid("Secure tunnel doctor timed out.") }
+        guard doctor.terminationStatus == 0 else {
+            throw ManagerError.invalid("Secure tunnel doctor failed; verify the profile, key permissions, organization, and local MCP target.")
+        }
+    }
+
+    private func tunnelIsReady(_ checked: ManagerSettings, expectedTunnelID: String) async -> Bool {
+        guard await healthIsReady(checked.tunnelHealthURL, token: ""),
+              await healthIsReady(checked.tunnelReadyURL, token: "") else { return false }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldUsePipelining = false
+        var request = URLRequest(url: checked.tunnelStatusURL, timeoutInterval: 1)
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        guard let (data, response) = try? await URLSession(configuration: configuration).data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return false }
+        return TunnelReadiness.matches(statusData: data, expectedTunnelID: expectedTunnelID)
+    }
+
+    private func controlPlaneKey() throws -> String {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["CI"] == "1", environment["CODEXPRO_MANAGER_SETTINGS"] != nil,
+           let testKey = environment["CODEXPRO_MANAGER_TEST_CONTROL_PLANE_API_KEY"] {
+            return testKey
+        }
+        return try KeychainTokenStore.read(account: .controlPlaneKey)
+    }
+
+    private func launchManaged(executable: String, arguments: [String], directory: String,
+                               environment: [String: String], exit: @escaping @MainActor (Int32) -> Void) throws -> Process {
+        guard let managerExecutable = Bundle.main.executableURL else {
+            throw ManagerError.invalid("Manager executable location is unavailable.")
+        }
+        let launcher = managerExecutable.deletingLastPathComponent().appendingPathComponent("CodexProSafeLauncher")
+        guard FileManager.default.isExecutableFile(atPath: launcher.path) else {
+            throw ManagerError.invalid("Trusted process launcher is missing beside the Manager.")
+        }
+        let child = Process()
+        child.executableURL = launcher
+        child.arguments = [executable] + arguments
+        child.environment = environment
+        child.currentDirectoryURL = URL(fileURLWithPath: directory)
+        let output = Pipe()
+        child.standardOutput = output
+        child.standardError = output
+        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let text = String(decoding: handle.availableData, as: UTF8.self)
+            Task { @MainActor in self?.append(text) }
+        }
+        child.terminationHandler = { terminated in
+            let code = terminated.terminationStatus
+            Task { @MainActor in exit(code) }
+        }
+        try child.run()
+        guard verifyProcessGroup(child.processIdentifier) else {
+            child.terminate()
+            throw ManagerError.invalid("Could not isolate a managed process group.")
+        }
+        return child
+    }
+
+    private func signalOwned(_ child: Process?, signal: Int32) {
+        guard let child, child.isRunning, getpgid(child.processIdentifier) == child.processIdentifier else { return }
+        kill(-child.processIdentifier, signal)
+    }
+
+    private func forceStopAfterGrace(_ children: [Process]) {
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            for child in children where child.isRunning { signalOwned(child, signal: SIGKILL) }
+        }
     }
 
     private func verifyProcessGroup(_ processIdentifier: Int32) -> Bool {
@@ -310,12 +472,14 @@ final class ManagerModel: NSObject, ObservableObject {
     }
 }
 
+enum KeychainAccount: String { case httpToken = "http-token", controlPlaneKey = "openai-control-plane-key" }
+
 enum KeychainTokenStore {
     private static let service = "com.prometheusprophet.codexpro-safe-manager"
-    static func read() throws -> String {
+    static func read(account: KeychainAccount) throws -> String {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: service,
-                                    kSecAttrAccount as String: "http-token",
+                                    kSecAttrAccount as String: account.rawValue,
                                     kSecReturnData as String: true,
                                     kSecMatchLimit as String: kSecMatchLimitOne]
         var item: CFTypeRef?
@@ -324,10 +488,10 @@ enum KeychainTokenStore {
         guard result == errSecSuccess, let data = item as? Data else { throw ManagerError.invalid("Keychain read failed.") }
         return String(decoding: data, as: UTF8.self)
     }
-    static func save(_ token: String) throws {
+    static func save(_ token: String, account: KeychainAccount) throws {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: service,
-                                   kSecAttrAccount as String: "http-token"]
+                                   kSecAttrAccount as String: account.rawValue]
         if token.isEmpty { SecItemDelete(base as CFDictionary); return }
         let data = Data(token.utf8)
         let update = SecItemUpdate(base as CFDictionary, [kSecValueData as String: data] as CFDictionary)
@@ -371,6 +535,7 @@ struct ManagerMenu: View {
 struct SettingsView: View {
     @EnvironmentObject var model: ManagerModel
     @State private var token = ""
+    @State private var controlPlaneKey = ""
     var body: some View {
         Form {
             directoryField("Repository", path: $model.settings.repository) { selected in
@@ -388,15 +553,30 @@ struct SettingsView: View {
             Picker("Access", selection: $model.settings.accessProfile) {
                 ForEach(AccessProfile.allCases, id: \.self) { Text($0.rawValue.capitalized) }
             }
-            LabeledContent("Tunnel", value: "Local only (verified)")
-            SecureField("Bearer token", text: $token)
+            Picker("Tunnel", selection: $model.settings.tunnelMode) {
+                Text("Local only").tag(TunnelMode.none)
+                Text("OpenAI Secure MCP Tunnel").tag(TunnelMode.openAI)
+            }
+            if model.settings.tunnelMode == .openAI {
+                fileField("Tunnel client", path: $model.settings.tunnelClientPath)
+                TextField("Tunnel profile", text: $model.settings.tunnelProfile)
+                TextField("Tunnel health port", value: $model.settings.tunnelHealthPort, format: .number)
+                TextField("Organization ID (optional)", text: $model.settings.organizationID)
+                SecureField("OpenAI runtime API key", text: $controlPlaneKey)
+                Button("Save OpenAI Runtime Key") {
+                    model.saveControlPlaneKey(controlPlaneKey)
+                    controlPlaneKey = ""
+                }
+            }
+            SecureField("Connector bearer token", text: $token)
             Toggle("Restart after unexpected exit", isOn: $model.settings.restartOnFailure)
             Toggle("Start connector when Manager opens", isOn: $model.settings.autoStartServices)
             Toggle("Launch Manager at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
             HStack {
                 Button("Save Settings") { model.save() }
-                Button("Save Token") { model.saveToken(token); token = "" }
+                Button("Save Connector Token") { model.saveToken(token); token = "" }
             }
+            Text("Secure tunneling is outbound-only and opt-in. Readiness requires exact profile identity plus an authenticated healthy main channel.").foregroundStyle(.secondary)
             Text("Codex diagnostics remain off until native trust proof is implemented.").foregroundStyle(.secondary)
             Text(model.status).foregroundStyle(.secondary)
         }
@@ -418,6 +598,22 @@ struct SettingsView: View {
                 }
                 if panel.runModal() == .OK, let selected = panel.url {
                     onSelect(selected.resolvingSymlinksInPath().standardizedFileURL.path)
+                }
+            }
+        }
+    }
+
+    private func fileField(_ label: String, path: Binding<String>) -> some View {
+        HStack {
+            TextField(label, text: path)
+            Button("Choose…") {
+                let panel = NSOpenPanel()
+                panel.title = "Choose \(label)"
+                panel.canChooseDirectories = false
+                panel.canChooseFiles = true
+                panel.allowsMultipleSelection = false
+                if panel.runModal() == .OK, let selected = panel.url {
+                    path.wrappedValue = selected.resolvingSymlinksInPath().standardizedFileURL.path
                 }
             }
         }

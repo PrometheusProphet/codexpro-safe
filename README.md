@@ -381,7 +381,12 @@ fail-closed takeover of an exact matching local connector with process identity
 revalidation, mismatch preservation, endpoint shutdown proof, and Manager-owned
 relaunch. Phase 4.5 adds synchronous settings initialization, first-run directory
 selection, opt-in connector auto-start, wake recovery, unexpected-exit recovery
-proof, and a reversible user-local development installation. Its native
+proof, and a reversible user-local development installation. Phase 5 adds an
+opt-in OpenAI Secure MCP Tunnel adapter with a Keychain runtime key, bounded
+preflight, separate process-group lifecycle, exact authenticated tunnel identity
+and main-channel readiness, and independent tunnel recovery while the local
+connector remains available. This is an outbound private connection rather than
+a public inbound listener. Its native
 diagnostic profile remains off until a separate macOS trust boundary is
 implemented and reviewed.
 
