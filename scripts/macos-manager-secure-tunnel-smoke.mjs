@@ -32,12 +32,20 @@ const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codexpro-safe-manag
 const profileDirectory = path.join(temporaryRoot, 'profiles');
 const settingsPath = path.join(temporaryRoot, 'settings.json');
 const fakeClient = path.join(temporaryRoot, 'tunnel-client');
+const doctorFailureState = path.join(temporaryRoot, 'doctor-failures');
 const tunnelID = 'tunnel_macSmoke123';
 fs.mkdirSync(profileDirectory, { recursive: true, mode: 0o700 });
 fs.writeFileSync(path.join(profileDirectory, 'codexpro-safe-local.yaml'), `tunnel_id: ${tunnelID}\n`, { mode: 0o600 });
+fs.writeFileSync(doctorFailureState, '1', { mode: 0o600 });
 fs.writeFileSync(fakeClient, `#!/usr/bin/env node
 const http = require('node:http');
-if (process.argv[2] === 'doctor') process.exit(process.env.CONTROL_PLANE_API_KEY ? 0 : 2);
+const fs = require('node:fs');
+if (process.argv[2] === 'doctor') {
+  const state = process.env.CODEXPRO_MANAGER_TEST_DOCTOR_FAILURE_STATE;
+  const remaining = state ? Number(fs.readFileSync(state, 'utf8')) : 0;
+  if (remaining > 0) { fs.writeFileSync(state, String(remaining - 1)); process.exit(2); }
+  process.exit(process.env.CONTROL_PLANE_API_KEY ? 0 : 2);
+}
 if (process.argv[2] !== 'run') process.exit(64);
 const address = process.env.HEALTH_LISTEN_ADDR || '127.0.0.1:8080';
 const port = Number(address.slice(address.lastIndexOf(':') + 1));
@@ -77,6 +85,8 @@ const app = spawn(manager, [], {
     NO_COLOR: '1',
     CODEXPRO_MANAGER_SETTINGS: settingsPath,
     CODEXPRO_MANAGER_TEST_CONTROL_PLANE_API_KEY: 'synthetic-runtime-key',
+    CODEXPRO_MANAGER_TEST_DOCTOR_FAILURE_STATE: doctorFailureState,
+    CODEXPRO_MANAGER_TEST_TUNNEL_RETRY_MILLISECONDS: '50',
     TUNNEL_CLIENT_PROFILE_DIR: profileDirectory
   },
   stdio: ['ignore', 'pipe', 'pipe']
@@ -132,6 +142,7 @@ try {
   const recoveryCycles = Math.max(1, Math.min(10, Number(process.env.CODEXPRO_MAC_RECOVERY_CYCLES ?? 1)));
   const soakSeconds = Math.max(0, Math.min(3600, Number(process.env.CODEXPRO_MAC_SOAK_SECONDS ?? 0)));
   let tunnelGroup = await waitForTunnel();
+  assert.equal(fs.readFileSync(doctorFailureState, 'utf8'), '0', 'Manager did not recover from the injected startup doctor failure.');
   await verifyLocalToolCall();
   for (let cycle = 0; cycle < recoveryCycles; cycle += 1) {
     process.kill(-tunnelGroup, 'SIGKILL');

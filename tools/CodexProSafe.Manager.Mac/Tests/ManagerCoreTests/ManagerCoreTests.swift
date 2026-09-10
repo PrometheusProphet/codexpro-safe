@@ -95,6 +95,15 @@ final class ManagerCoreTests: XCTestCase {
         try Data(repeating: 65, count: 65_537).write(to: root.appendingPathComponent("large.yaml"))
         XCTAssertNil(TunnelReadiness.expectedTunnelID(profile: "large", environment: environment))
     }
+    func testTunnelRetryPolicyIsBoundedAndResettable() {
+        var policy = TunnelRetryPolicy()
+        for expected in 1...TunnelRetryPolicy.maximumAttempts {
+            XCTAssertEqual(policy.nextAttempt(), expected)
+        }
+        XCTAssertNil(policy.nextAttempt())
+        policy.reset()
+        XCTAssertEqual(policy.nextAttempt(), 1)
+    }
     func testDiagnosticHelperTrustRequiresExactSingleLinkFingerprint() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let macOS = root.appendingPathComponent("Test.app/Contents/MacOS")

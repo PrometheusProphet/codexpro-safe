@@ -20,6 +20,8 @@ final class ManagerModel: NSObject, ObservableObject {
     private var tunnelProcess: Process?
     private var healthTask: Task<Void, Never>?
     private var monitorTask: Task<Void, Never>?
+    private var tunnelRetryTask: Task<Void, Never>?
+    private var tunnelRetryPolicy = TunnelRetryPolicy()
     private var intentionalStop = false
     private var restartRequested = false
     private var suppressNextTunnelRecovery = false
@@ -83,6 +85,9 @@ final class ManagerModel: NSObject, ObservableObject {
     func start() {
         guard connectorProcess == nil, tunnelProcess == nil else { return }
         do {
+            tunnelRetryTask?.cancel()
+            tunnelRetryTask = nil
+            tunnelRetryPolicy.reset()
             let checked = try settings.validated()
             let token = try KeychainTokenStore.read(account: .httpToken)
             if try ExternalConnectorInspector.loopbackListenerIsPresent(port: checked.port) {
@@ -125,6 +130,9 @@ final class ManagerModel: NSObject, ObservableObject {
             return
         }
         intentionalStop = true
+        tunnelRetryTask?.cancel()
+        tunnelRetryTask = nil
+        tunnelRetryPolicy.reset()
         state = .stopping
         status = "Stopping services"
         healthTask?.cancel()
@@ -261,6 +269,7 @@ final class ManagerModel: NSObject, ObservableObject {
         intentionalStop = true
         healthTask?.cancel()
         monitorTask?.cancel()
+        tunnelRetryTask?.cancel()
         let children = [tunnelProcess, connectorProcess].compactMap { $0 }
         for child in children { signalOwned(child, signal: SIGTERM) }
         for _ in 0..<100 where children.contains(where: \.isRunning) { usleep(10_000) }
@@ -314,6 +323,9 @@ final class ManagerModel: NSObject, ObservableObject {
     private func connectorDidExit(code: Int32) {
         healthTask?.cancel()
         healthTask = nil
+        tunnelRetryTask?.cancel()
+        tunnelRetryTask = nil
+        tunnelRetryPolicy.reset()
         connectorProcess = nil
         if tunnelProcess != nil {
             suppressNextTunnelRecovery = true
@@ -339,9 +351,7 @@ final class ManagerModel: NSObject, ObservableObject {
         if intentionalStop { finishStopIfPossible(); return }
         state = .degraded
         status = "Secure tunnel exited (\(code)); local connector remains available"
-        if settings.restartOnFailure, connectorProcess?.isRunning == true {
-            Task { try? await Task.sleep(for: .seconds(2)); await startTunnel(settings) }
-        }
+        scheduleTunnelRetry(settings, reason: status)
     }
 
     private func finishStopIfPossible() {
@@ -386,6 +396,9 @@ final class ManagerModel: NSObject, ObservableObject {
             for _ in 0..<120 {
                 if Task.isCancelled { return }
                 if await tunnelIsReady(checked, expectedTunnelID: expectedID) {
+                    tunnelRetryTask?.cancel()
+                    tunnelRetryTask = nil
+                    tunnelRetryPolicy.reset()
                     state = .ready
                     status = "Connector and authenticated OpenAI secure tunnel ready"
                     let token = try KeychainTokenStore.read(account: .httpToken)
@@ -400,6 +413,25 @@ final class ManagerModel: NSObject, ObservableObject {
         } catch {
             state = .degraded
             status = error.localizedDescription
+            scheduleTunnelRetry(checked, reason: error.localizedDescription)
+        }
+    }
+
+    private func scheduleTunnelRetry(_ checked: ManagerSettings, reason: String) {
+        guard checked.restartOnFailure, connectorProcess?.isRunning == true,
+              !intentionalStop, let attempt = tunnelRetryPolicy.nextAttempt() else { return }
+        tunnelRetryTask?.cancel()
+        status = "\(reason) Retrying secure tunnel (\(attempt)/\(TunnelRetryPolicy.maximumAttempts))."
+        let environment = ProcessInfo.processInfo.environment
+        let delayMilliseconds = environment["CI"] == "1" && environment["CODEXPRO_MANAGER_SETTINGS"] != nil
+            ? min(5_000, max(50, Int(environment["CODEXPRO_MANAGER_TEST_TUNNEL_RETRY_MILLISECONDS"] ?? "5000") ?? 5_000))
+            : 5_000
+        tunnelRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(delayMilliseconds))
+            guard !Task.isCancelled, let self, self.connectorProcess?.isRunning == true,
+                  !self.intentionalStop else { return }
+            self.tunnelRetryTask = nil
+            await self.startTunnel(checked)
         }
     }
 

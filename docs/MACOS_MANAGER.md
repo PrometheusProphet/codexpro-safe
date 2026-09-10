@@ -99,7 +99,12 @@ tunnel exit may restart only the tunnel while the local connector stays
 available. Connector exit stops its dependent tunnel before bounded recovery.
 Occupied tunnel health ports are refused and external tunnel processes are
 never taken over. Failure of `doctor` or authenticated readiness leaves the
-connector local and reports degraded status.
+connector local and reports degraded status. When supervised recovery is
+enabled, an initial tunnel startup, Keychain-access, doctor, or readiness
+failure is retried at five-second intervals with a hard limit of 12 attempts;
+Stop, Quit, connector exit, or a new explicit Start cancels and resets that
+bounded retry state. Permanent misconfiguration therefore remains visible and
+does not create an unbounded retry loop.
 
 ## Build and test
 
@@ -117,7 +122,8 @@ npm run test:diagnostic-native-boundary
 
 The secure-tunnel smoke uses a synthetic control plane and never contacts
 OpenAI. It proves ordered dual-process lifecycle, exact authenticated-status
-matching, independent tunnel crash recovery, and a real local MCP tool call.
+matching, recovery from an injected initial doctor failure, independent tunnel
+crash recovery, and a real local MCP tool call.
 A release-readiness record must additionally include a live tunnel and real
 remote tool call; an open port or the synthetic gate alone is insufficient.
 

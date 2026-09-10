@@ -176,6 +176,21 @@ public enum TunnelReadiness {
     }
 }
 
+public struct TunnelRetryPolicy: Sendable {
+    public static let maximumAttempts = 12
+    public private(set) var attempts = 0
+
+    public init() {}
+
+    public mutating func nextAttempt() -> Int? {
+        guard attempts < Self.maximumAttempts else { return nil }
+        attempts += 1
+        return attempts
+    }
+
+    public mutating func reset() { attempts = 0 }
+}
+
 public struct DiagnosticHelperContract: Equatable, Sendable {
     public let executablePath: String
     public let protocolVersion: String

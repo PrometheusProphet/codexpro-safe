@@ -90,7 +90,7 @@ function processStartEpoch(pid) {
   return Math.floor(value / 1000);
 }
 
-function verifyOwnedLifecycle(settings, requiredPreexistingEpoch = null) {
+function verifyOwnedLifecycle(settings, requiredPreexistingEpoch = null, requiredBootEpoch = null) {
   const rows = processRows();
   const managers = rows.filter((row) => row.command === managerBinary);
   assert.equal(managers.length, 1, 'Expected exactly one installed Manager process.');
@@ -112,6 +112,13 @@ function verifyOwnedLifecycle(settings, requiredPreexistingEpoch = null) {
     for (const process of [manager, connectors[0], tunnels[0]]) {
       assert.ok(processStartEpoch(process.pid) < requiredPreexistingEpoch,
         'A managed process did not predate the required power event.');
+    }
+  }
+  if (requiredBootEpoch !== null) {
+    for (const process of [manager, connectors[0], tunnels[0]]) {
+      const startedAt = processStartEpoch(process.pid);
+      assert.ok(startedAt >= requiredBootEpoch && startedAt <= requiredBootEpoch + 300,
+        'A managed process was not launched within five minutes of the verified boot.');
     }
   }
   return true;
@@ -216,7 +223,7 @@ if (stage === 'post-wake') {
 
 const profileTunnelID = expectedTunnelID(settings);
 console.log('checking Manager-owned process groups and listeners...');
-verifyOwnedLifecycle(settings, wakeEpoch);
+verifyOwnedLifecycle(settings, wakeEpoch, stage === 'post-reboot' ? bootEpoch : null);
 console.log('checking live authenticated endpoints and local MCP call...');
 const initial = await liveSnapshot(settings, profileTunnelID, true);
 let samples = 1;
@@ -263,7 +270,8 @@ const evidence = {
   initial,
   final,
   powerEvidence: { bootAgeSeconds, wakeAgeSeconds,
-    processesPredatedWake: stage === 'post-wake' ? true : null },
+    processesPredatedWake: stage === 'post-wake' ? true : null,
+    processesStartedWithinFiveMinutesOfBoot: stage === 'post-reboot' ? true : null },
   soak: { durationSeconds, samples, readinessLosses, recoveryTransitions, requiredRecoveries,
     certificationEligible: durationSeconds >= 3600 && recoveryTransitions >= 2 }
 };
