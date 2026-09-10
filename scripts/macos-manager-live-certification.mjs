@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,11 +10,11 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 const allowedStages = new Set(['baseline', 'post-reboot', 'post-wake', 'soak']);
 const argumentsList = process.argv.slice(2);
 if (argumentsList.length === 1 && argumentsList[0] === '--help') {
-  console.log('Usage: node scripts/macos-manager-live-certification.mjs --stage <baseline|post-reboot|post-wake|soak> [--installation <user|system>] [--duration-seconds 3600] [--required-recoveries 2]');
+  console.log('Usage: node scripts/macos-manager-live-certification.mjs --stage <baseline|post-reboot|post-wake|soak> [--installation <user|system>] [--expected-saved-profile <planning|edit|develop|full>] [--duration-seconds 3600] [--required-recoveries 2]');
   process.exit(0);
 }
 
-const recognizedOptions = new Set(['--stage', '--installation', '--duration-seconds', '--required-recoveries']);
+const recognizedOptions = new Set(['--stage', '--installation', '--expected-saved-profile', '--duration-seconds', '--required-recoveries']);
 for (let index = 0; index < argumentsList.length; index += 2) {
   assert.ok(recognizedOptions.has(argumentsList[index]), `Unsupported option: ${argumentsList[index] ?? ''}`);
   assert.ok(index + 1 < argumentsList.length && !argumentsList[index + 1].startsWith('--'),
@@ -33,6 +34,9 @@ const stage = option('--stage', 'baseline');
 assert.ok(allowedStages.has(stage), 'Unsupported certification stage.');
 const installation = option('--installation', 'user');
 assert.ok(['user', 'system'].includes(installation), 'Installation must be user or system.');
+const expectedSavedProfile = option('--expected-saved-profile', 'planning');
+assert.ok(['planning', 'edit', 'develop', 'full'].includes(expectedSavedProfile), 'Unsupported expected saved profile.');
+if (stage !== 'soak') assert.equal(expectedSavedProfile, 'planning', 'Only a soak may acknowledge intentional saved-profile drift.');
 const durationSeconds = Number(option('--duration-seconds', stage === 'soak' ? '3600' : '0'));
 const requiredRecoveries = Number(option('--required-recoveries', stage === 'soak' ? '2' : '0'));
 assert.ok(Number.isInteger(durationSeconds) && durationSeconds >= 0 && durationSeconds <= 86_400,
@@ -48,6 +52,7 @@ const managerBinary = path.join(managerApp, 'Contents/MacOS/CodexProSafeManager'
 const settingsPath = path.join(os.homedir(), 'Library/Application Support/CodexProSafe Manager/settings.json');
 const evidenceDirectory = path.join(repoRoot, '.ai-bridge');
 const evidencePath = path.join(evidenceDirectory, `macos-manager-certification-${stage}.json`);
+const networkEventsPath = path.join(evidenceDirectory, 'macos-manager-network-events.json');
 
 function fixedCommand(executable, args = []) {
   const result = spawnSync(executable, args, { encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 30_000 });
@@ -66,6 +71,21 @@ function readBoundedText(file, maximumBytes, requirePrivateMode = false, allowed
 
 function readBoundedJSON(file, maximumBytes) {
   return JSON.parse(readBoundedText(file, maximumBytes, true));
+}
+
+function writePrivateJSONAtomic(file, value) {
+  const directory = path.dirname(file);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const directoryStat = fs.lstatSync(directory);
+  assert.ok(directoryStat.isDirectory() && !directoryStat.isSymbolicLink() && directoryStat.uid === process.getuid() &&
+    fs.realpathSync(directory) === directory, 'Certification evidence directory has unsafe object identity.');
+  const temporaryPath = path.join(directory, `.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+    fs.renameSync(temporaryPath, file);
+  } finally {
+    fs.rmSync(temporaryPath, { force: true });
+  }
 }
 
 function processRows() {
@@ -132,6 +152,18 @@ async function boundedFetch(url, kind = 'text') {
   return kind === 'json' ? JSON.parse(bytes.toString('utf8')) : bytes.toString('utf8').trim();
 }
 
+async function pollMetrics(settings) {
+  const metrics = await boundedFetch(`http://127.0.0.1:${settings.tunnelHealthPort}/metrics`);
+  const errorValues = [...metrics.matchAll(/^commands_poll_errors_total(?:\{[^}]*\})?\s+([0-9.eE+-]+)$/gm)]
+    .map((match) => Number(match[1]));
+  const cycleValue = Number(metrics.match(/^commands_poll_cycles_total(?:\{[^}]*\})?\s+([0-9.eE+-]+)$/m)?.[1]);
+  const successValue = Number(metrics.match(/^commands_poll_last_successful_timestamp_seconds(?:\{[^}]*\})?\s+([0-9.eE+-]+)$/m)?.[1]);
+  assert.ok(errorValues.length > 0 && errorValues.every(Number.isFinite), 'Tunnel poll-error metrics are unavailable.');
+  assert.ok(Number.isFinite(cycleValue) && Number.isFinite(successValue), 'Tunnel poll lifecycle metrics are unavailable.');
+  return { errorsTotal: errorValues.reduce((sum, value) => sum + value, 0), cyclesTotal: cycleValue,
+    lastSuccessfulTimestampSeconds: successValue };
+}
+
 async function verifyLocalToolCall(port) {
   const client = new Client({ name: 'macos-manager-live-certification', version: '1.0.0' });
   try {
@@ -178,7 +210,7 @@ async function liveSnapshot(settings, profileTunnelID, includeToolCall) {
 }
 
 const settings = readBoundedJSON(settingsPath, 64 * 1024);
-assert.equal(settings.accessProfile, 'planning', 'Physical certification requires the Safe Planning profile.');
+assert.equal(settings.accessProfile, expectedSavedProfile, 'Saved access profile did not match the explicit certification expectation.');
 assert.equal(settings.tunnelMode, 'openai-secure', 'Physical certification requires the deliberate OpenAI tunnel mode.');
 assert.equal(settings.restartOnFailure, true, 'Physical certification requires supervised recovery to be enabled.');
 assert.ok(Number.isInteger(settings.port) && Number.isInteger(settings.tunnelHealthPort));
@@ -225,7 +257,16 @@ const profileTunnelID = expectedTunnelID(settings);
 console.log('checking Manager-owned process groups and listeners...');
 verifyOwnedLifecycle(settings, wakeEpoch, stage === 'post-reboot' ? bootEpoch : null);
 console.log('checking live authenticated endpoints and local MCP call...');
+const initialPollMetrics = await pollMetrics(settings);
 const initial = await liveSnapshot(settings, profileTunnelID, true);
+const soakStartedAt = new Date();
+const networkRunID = stage === 'soak' && requiredRecoveries > 0 ? randomUUID() : null;
+if (networkRunID) {
+  writePrivateJSONAtomic(networkEventsPath, {
+    schema: 'codexpro-safe-macos-network-events-v1', runID: networkRunID,
+    soakStartedAt: soakStartedAt.toISOString(), status: 'active', cycles: []
+  });
+}
 let samples = 1;
 let readinessLosses = 0;
 let recoveryTransitions = 0;
@@ -248,23 +289,53 @@ while (Date.now() < deadline) {
 if (durationSeconds > 0) console.log('checking final recovery and MCP state...');
 const final = await liveSnapshot(settings, profileTunnelID, true);
 verifyOwnedLifecycle(settings);
-assert.ok(recoveryTransitions >= requiredRecoveries,
-  `Observed ${recoveryTransitions} recoveries; ${requiredRecoveries} required.`);
+const finalPollMetrics = await pollMetrics(settings);
+const pollErrorsDelta = finalPollMetrics.errorsTotal - initialPollMetrics.errorsTotal;
+const pollCyclesDelta = finalPollMetrics.cyclesTotal - initialPollMetrics.cyclesTotal;
+const lastSuccessfulPollAgeSeconds = Math.max(0,
+  Math.floor(Date.now() / 1000 - finalPollMetrics.lastSuccessfulTimestampSeconds));
+const controlPlaneRecovered = finalPollMetrics.lastSuccessfulTimestampSeconds > initialPollMetrics.lastSuccessfulTimestampSeconds &&
+  lastSuccessfulPollAgeSeconds <= 90;
+assert.ok(pollErrorsDelta >= requiredRecoveries,
+  `Observed ${pollErrorsDelta} new control-plane poll errors; ${requiredRecoveries} required.`);
+if (requiredRecoveries > 0) assert.ok(controlPlaneRecovered, 'No recent successful control-plane poll followed the network errors.');
+let recordedNetworkCycles = 0;
+if (networkRunID) {
+  const networkEvents = readBoundedJSON(networkEventsPath, 64 * 1024);
+  assert.equal(networkEvents.schema, 'codexpro-safe-macos-network-events-v1');
+  assert.equal(networkEvents.runID, networkRunID, 'Network events belong to a different soak run.');
+  assert.ok(Array.isArray(networkEvents.cycles));
+  assert.ok(networkEvents.cycles.length >= requiredRecoveries,
+    `Observed ${networkEvents.cycles.length} distinct network cycles; ${requiredRecoveries} required.`);
+  for (const [index, cycle] of networkEvents.cycles.entries()) {
+    assert.equal(cycle.index, index + 1);
+    assert.ok(Number.isInteger(cycle.offSeconds) && cycle.offSeconds >= 10);
+    assert.ok(Number.isFinite(cycle.pollErrorsDelta) && cycle.pollErrorsDelta >= 1);
+    assert.equal(cycle.successfulPollAdvanced, true);
+    const started = Date.parse(cycle.startedAt);
+    const recovered = Date.parse(cycle.recoveredAt);
+    assert.ok(Number.isFinite(started) && Number.isFinite(recovered) && started >= soakStartedAt.getTime() &&
+      recovered >= started && recovered <= Date.now(), 'Network cycle timestamps are outside this soak.');
+  }
+  recordedNetworkCycles = networkEvents.cycles.length;
+  writePrivateJSONAtomic(networkEventsPath, { ...networkEvents, status: 'completed' });
+}
 
 const sourceCommit = fixedCommand('/usr/bin/git', ['rev-parse', '--short=12', 'HEAD']);
 const sourceClean = fixedCommand('/usr/bin/git', ['status', '--porcelain', '--untracked-files=no']) === '';
 const evidence = {
-  schema: 'codexpro-safe-macos-certification-v1',
+  schema: 'codexpro-safe-macos-certification-v2',
   recordedAt: new Date().toISOString(),
   stage,
   sourceCommit,
   sourceClean,
-  safeSettings: {
-    accessProfile: 'planning',
+  savedSettings: {
+    accessProfile: settings.accessProfile,
     tunnelMode: 'openai-secure',
     restartOnFailure: true,
     autoStartServices: settings.autoStartServices === true
   },
+  effectiveRuntimeRequired: { writeMode: 'handoff', bashMode: 'off' },
   nativeState: { installation, loginItem, diagnosticHelper: 'sealed', controlPlaneKey: 'configured' },
   lifecycleOwnership: 'verified',
   initial,
@@ -273,9 +344,12 @@ const evidence = {
     processesPredatedWake: stage === 'post-wake' ? true : null,
     processesStartedWithinFiveMinutesOfBoot: stage === 'post-reboot' ? true : null },
   soak: { durationSeconds, samples, readinessLosses, recoveryTransitions, requiredRecoveries,
-    certificationEligible: durationSeconds >= 3600 && recoveryTransitions >= 2 }
+    controlPlanePollErrors: pollErrorsDelta, controlPlanePollCycles: pollCyclesDelta,
+    lastSuccessfulPollAgeSeconds, controlPlaneRecovered,
+    distinctNetworkCycles: recordedNetworkCycles,
+    certificationEligible: durationSeconds >= 3600 && requiredRecoveries >= 2 &&
+      recordedNetworkCycles >= requiredRecoveries && pollErrorsDelta >= requiredRecoveries && controlPlaneRecovered }
 };
-fs.mkdirSync(evidenceDirectory, { recursive: true, mode: 0o700 });
-fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+writePrivateJSONAtomic(evidencePath, evidence);
 console.log(`✓ ${stage} live lifecycle, exact tunnel identity, and local MCP proof passed`);
 console.log(`sanitized evidence: .ai-bridge/${path.basename(evidencePath)}`);

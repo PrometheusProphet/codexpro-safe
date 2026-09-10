@@ -272,12 +272,35 @@ npm run manager:mac:certify-live -- --stage soak \
   --duration-seconds 3600 --required-recoveries 2
 ```
 
+If another operator intentionally saves a broader profile without restarting
+the live Planning connector, a soak may acknowledge that exact saved value with
+`--expected-saved-profile`. The runner records the saved setting separately and
+still requires both initial and final MCP calls to prove effective `handoff`
+writes and Bash off. A restart that applies the broader profile therefore fails
+the soak rather than silently weakening certification. Non-soak checkpoints
+always require the saved Planning profile.
+
 `baseline` fails unless Planning mode, connector auto-start off, and Launch at
 Login off are preserved. `post-reboot` is intentionally different: enable both
 startup controls first, reboot, then run it; restore both controls afterward if
 the daily-driver policy should remain opt-in. During the one-hour `soak`, perform
-at least two deliberate network interruptions and recoveries. The runner never
-changes network, startup, process, app, or credential state itself. A remote
+at least two deliberate network interruptions and recoveries. The tunnel may
+keep local `/readyz` healthy while its outbound control-plane poll is offline,
+so certification uses bounded Prometheus deltas: new poll errors must be
+followed by a recent successful poll. Each distinct outage must also be recorded
+against the active soak's random run ID by invoking the fixed network-cycle
+helper once per outage:
+
+```bash
+npm run manager:mac:network-cycle -- --off-seconds 45
+```
+
+The helper discovers only the hardware Wi-Fi interface, requires it to start
+on, restores it in a `finally`/signal path, and records only bounded timestamps,
+duration, poll-error delta, and successful-poll advancement. Local readiness
+transitions remain supplemental evidence rather than the network-recovery
+authority. The runner never changes network, startup, process, app, or
+credential state itself. A remote
 ChatGPT/Codex tool call and VoiceOver traversal remain separate manual evidence;
 the local runner does not claim either one.
 
