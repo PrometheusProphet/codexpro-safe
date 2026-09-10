@@ -181,8 +181,9 @@ npm run manager:mac:verify-installed
 This path installs the ad-hoc-signed development app in `~/Applications`,
 initializes missing settings for this checkout and Node executable, and opens the
 menu-bar app. It is not a notarized public installer. Verification briefly
-registers the exact installed app as a login item, confirms its status, then
-unregisters it and leaves the final state `notRegistered`.
+registers and unregisters the exact installed app when no registration exists.
+An existing enabled or approval-pending registration is preserved and rechecked
+instead of being disabled by verification.
 
 For a distribution build, provide the exact Developer ID identities already
 installed in the signing keychain and a `notarytool` Keychain profile:
