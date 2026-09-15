@@ -34,6 +34,7 @@ const settingsPath = path.join(temporaryRoot, 'settings.json');
 const fakeClient = path.join(temporaryRoot, 'tunnel-client');
 const doctorFailureState = path.join(temporaryRoot, 'doctor-failures');
 const tunnelID = 'tunnel_macSmoke123';
+const connectorToken = 'synthetic-connector-token';
 fs.mkdirSync(profileDirectory, { recursive: true, mode: 0o700 });
 fs.writeFileSync(path.join(profileDirectory, 'codexpro-safe-local.yaml'), `tunnel_id: ${tunnelID}\n`, { mode: 0o600 });
 fs.writeFileSync(doctorFailureState, '1', { mode: 0o600 });
@@ -44,9 +45,11 @@ if (process.argv[2] === 'doctor') {
   const state = process.env.CODEXPRO_MANAGER_TEST_DOCTOR_FAILURE_STATE;
   const remaining = state ? Number(fs.readFileSync(state, 'utf8')) : 0;
   if (remaining > 0) { fs.writeFileSync(state, String(remaining - 1)); process.exit(2); }
-  process.exit(process.env.CONTROL_PLANE_API_KEY ? 0 : 2);
+  const connectorToken = process.env.CODEXPRO_MANAGER_CONNECTOR_TOKEN;
+  process.exit(process.env.CONTROL_PLANE_API_KEY && connectorToken ? 0 : 2);
 }
 if (process.argv[2] !== 'run') process.exit(64);
+if (!process.env.CODEXPRO_MANAGER_CONNECTOR_TOKEN) process.exit(2);
 const address = process.env.HEALTH_LISTEN_ADDR || '127.0.0.1:8080';
 const port = Number(address.slice(address.lastIndexOf(':') + 1));
 const id = '${tunnelID}';
@@ -85,6 +88,7 @@ const app = spawn(manager, [], {
     NO_COLOR: '1',
     CODEXPRO_MANAGER_SETTINGS: settingsPath,
     CODEXPRO_MANAGER_TEST_CONTROL_PLANE_API_KEY: 'synthetic-runtime-key',
+    CODEXPRO_MANAGER_TEST_CONNECTOR_TOKEN: connectorToken,
     CODEXPRO_MANAGER_TEST_DOCTOR_FAILURE_STATE: doctorFailureState,
     CODEXPRO_MANAGER_TEST_TUNNEL_RETRY_MILLISECONDS: '50',
     TUNNEL_CLIENT_PROFILE_DIR: profileDirectory
@@ -128,7 +132,9 @@ async function waitForTunnel(excludedGroup) {
 async function verifyLocalToolCall() {
   const client = new Client({ name: 'macos-manager-secure-tunnel-smoke', version: '0.0.0' });
   try {
-    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${connectorPort}/mcp`)));
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${connectorPort}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${connectorToken}` } }
+    }));
     const result = await client.callTool({ name: 'server_config', arguments: {} });
     assert.notEqual(result.isError, true, result.content?.[0]?.text);
     assert.equal(result.structuredContent.writeMode, 'handoff');

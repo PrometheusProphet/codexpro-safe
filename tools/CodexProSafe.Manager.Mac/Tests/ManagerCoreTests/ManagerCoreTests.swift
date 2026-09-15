@@ -90,6 +90,9 @@ final class ManagerCoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try Data("tunnel_id: tunnel_abc123\n".utf8).write(to: root.appendingPathComponent("safe.yaml"))
         let environment = ["TUNNEL_CLIENT_PROFILE_DIR": root.path]
+        XCTAssertEqual(TunnelReadiness.profileURL(profile: "safe", environment: environment)?.path,
+                       root.appendingPathComponent("safe.yaml").path)
+        XCTAssertNil(TunnelReadiness.profileURL(profile: "../safe", environment: environment))
         XCTAssertEqual(TunnelReadiness.expectedTunnelID(profile: "safe", environment: environment), "tunnel_abc123")
         XCTAssertNil(TunnelReadiness.expectedTunnelID(profile: "../safe", environment: environment))
         try Data(repeating: 65, count: 65_537).write(to: root.appendingPathComponent("large.yaml"))

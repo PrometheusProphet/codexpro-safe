@@ -230,11 +230,23 @@ try {
     throw new Error(`expected unauthenticated healthz to return 401, got ${unauthorized.status}`);
   }
 
+  const absentOAuthMetadata = await fetch(`${baseUrl}/.well-known/oauth-protected-resource/mcp`);
+  if (absentOAuthMetadata.status !== 404) {
+    throw new Error(`expected unauthenticated absent OAuth metadata to return 404, got ${absentOAuthMetadata.status}`);
+  }
+
   const authorized = await fetch(`${baseUrl}/healthz`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   if (authorized.status !== 200) {
     throw new Error(`expected authenticated healthz to return 200, got ${authorized.status}`);
+  }
+
+  const managerAuthorized = await fetch(`${baseUrl}/healthz`, {
+    headers: { 'X-CodexPro-Manager-Token': token }
+  });
+  if (managerAuthorized.status !== 200) {
+    throw new Error(`expected Manager-token healthz to return 200, got ${managerAuthorized.status}`);
   }
 
   const queryAuthorized = await fetch(`${baseUrl}/healthz?codexpro_token=${encodeURIComponent(token)}`);

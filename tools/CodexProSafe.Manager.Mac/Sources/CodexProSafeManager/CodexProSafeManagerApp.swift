@@ -89,7 +89,7 @@ final class ManagerModel: NSObject, ObservableObject {
             tunnelRetryTask = nil
             tunnelRetryPolicy.reset()
             let checked = try settings.validated()
-            let token = try KeychainTokenStore.read(account: .httpToken)
+            let token = try connectorToken()
             if try ExternalConnectorInspector.loopbackListenerIsPresent(port: checked.port) {
                 throw ManagerError.invalid("The configured loopback port is already in use. Use Take Over Existing; mismatched processes will be refused.")
             }
@@ -154,7 +154,7 @@ final class ManagerModel: NSObject, ObservableObject {
         Task {
             do {
                 let checked = try settings.validated()
-                let token = try KeychainTokenStore.read(account: .httpToken)
+                let token = try connectorToken()
                 guard await healthIsReady(checked.localHealthURL, token: token) else {
                     throw ManagerError.invalid("No authenticated external connector is ready on the configured port.")
                 }
@@ -182,7 +182,7 @@ final class ManagerModel: NSObject, ObservableObject {
         Task {
             do {
                 let checked = try settings.validated()
-                let token = try KeychainTokenStore.read(account: .httpToken)
+                let token = try connectorToken()
                 try await ExternalConnectorInspector.stop(plan: plan, settings: checked)
                 guard await waitForHealthToStop(checked.localHealthURL, token: token) else {
                     throw ManagerError.invalid("External endpoint remained available after the verified process exited.")
@@ -228,7 +228,7 @@ final class ManagerModel: NSObject, ObservableObject {
         Task {
             do {
                 let checked = try settings.validated()
-                let token = try KeychainTokenStore.read(account: .httpToken)
+                let token = try connectorToken()
                 if let child = connectorProcess, child.isRunning {
                     if await healthIsReady(checked.localHealthURL, token: token) {
                         if checked.tunnelMode == .openAI {
@@ -371,23 +371,31 @@ final class ManagerModel: NSObject, ObservableObject {
             guard let expectedID = TunnelReadiness.expectedTunnelID(profile: checked.tunnelProfile) else {
                 throw ManagerError.invalid("The selected tunnel profile has no valid tunnel_id; local connector remains available.")
             }
+            guard let profileURL = TunnelReadiness.profileURL(profile: checked.tunnelProfile) else {
+                throw ManagerError.invalid("The selected tunnel profile path is invalid; local connector remains available.")
+            }
             let key = try controlPlaneKey()
             guard !key.isEmpty else {
                 throw ManagerError.invalid("Save an OpenAI runtime API key before starting the secure tunnel; local connector remains available.")
             }
+            let connectorToken = try connectorToken()
+            guard !connectorToken.isEmpty else {
+                throw ManagerError.invalid("Save a connector bearer token before starting the secure tunnel; local connector remains available.")
+            }
             status = "Checking secure tunnel configuration"
-            try await runTunnelDoctor(checked, key: key)
+            try await runTunnelDoctor(checked, profileURL: profileURL, key: key, connectorToken: connectorToken)
             var environment = ProcessInfo.processInfo.environment
             environment["CONTROL_PLANE_API_KEY"] = key
             environment["HEALTH_LISTEN_ADDR"] = "127.0.0.1:\(checked.tunnelHealthPort)"
             environment["ALLOW_REMOTE_UI"] = "false"
             environment["OPEN_WEB_UI"] = "false"
             environment["NO_COLOR"] = "1"
+            addConnectorAuthentication(to: &environment, token: connectorToken)
             if !checked.organizationID.isEmpty { environment["CONTROL_PLANE_ORGANIZATION_ID"] = checked.organizationID }
             status = "Starting OpenAI secure tunnel"
             tunnelProcess = try launchManaged(
                 executable: checked.tunnelClientPath,
-                arguments: checked.tunnelArguments,
+                arguments: ["run", "--profile-file", profileURL.path],
                 directory: checked.repository,
                 environment: environment,
                 captureOutput: false,
@@ -401,8 +409,7 @@ final class ManagerModel: NSObject, ObservableObject {
                     tunnelRetryPolicy.reset()
                     state = .ready
                     status = "Connector and authenticated OpenAI secure tunnel ready"
-                    let token = try KeychainTokenStore.read(account: .httpToken)
-                    beginMonitoring(checked, token: token)
+                    beginMonitoring(checked, token: connectorToken)
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(250))
@@ -435,14 +442,16 @@ final class ManagerModel: NSObject, ObservableObject {
         }
     }
 
-    private func runTunnelDoctor(_ checked: ManagerSettings, key: String) async throws {
+    private func runTunnelDoctor(_ checked: ManagerSettings, profileURL: URL,
+                                 key: String, connectorToken: String) async throws {
         let doctor = Process()
         doctor.executableURL = URL(fileURLWithPath: checked.tunnelClientPath)
-        doctor.arguments = ["doctor", "--profile", checked.tunnelProfile, "--explain", "--json"]
+        doctor.arguments = ["doctor", "--profile-file", profileURL.path, "--explain", "--json"]
         var environment = ProcessInfo.processInfo.environment
         environment["CONTROL_PLANE_API_KEY"] = key
         environment["HEALTH_LISTEN_ADDR"] = "127.0.0.1:\(checked.tunnelHealthPort)"
         environment["NO_COLOR"] = "1"
+        addConnectorAuthentication(to: &environment, token: connectorToken)
         if !checked.organizationID.isEmpty { environment["CONTROL_PLANE_ORGANIZATION_ID"] = checked.organizationID }
         doctor.environment = environment
         doctor.standardOutput = FileHandle.nullDevice
@@ -453,6 +462,10 @@ final class ManagerModel: NSObject, ObservableObject {
         guard doctor.terminationStatus == 0 else {
             throw ManagerError.invalid("Secure tunnel doctor failed; verify the profile, key permissions, organization, and local MCP target.")
         }
+    }
+
+    private func addConnectorAuthentication(to environment: inout [String: String], token: String) {
+        environment["CODEXPRO_MANAGER_CONNECTOR_TOKEN"] = token
     }
 
     private func tunnelIsReady(_ checked: ManagerSettings, expectedTunnelID: String) async -> Bool {
@@ -474,6 +487,15 @@ final class ManagerModel: NSObject, ObservableObject {
             return testKey
         }
         return try KeychainTokenStore.read(account: .controlPlaneKey)
+    }
+
+    private func connectorToken() throws -> String {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["CI"] == "1", environment["CODEXPRO_MANAGER_SETTINGS"] != nil,
+           let testToken = environment["CODEXPRO_MANAGER_TEST_CONNECTOR_TOKEN"] {
+            return testToken
+        }
+        return try KeychainTokenStore.read(account: .httpToken)
     }
 
     private func launchManaged(executable: String, arguments: [String], directory: String,

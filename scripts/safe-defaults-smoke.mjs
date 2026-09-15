@@ -49,6 +49,7 @@ const { redactSensitiveText, redactSensitiveTextWithCount, hasSecretValue } = aw
 const fakePemPrivateKey = ['-----BEGIN ', 'PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END ', 'PRIVATE KEY-----'].join('');
 const sensitiveSamples = [
   'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payloadpart.signaturepart',
+  'X-CodexPro-Manager-Token: abcdefghijklmnopqrstuvwxyz123456',
   'const jwt = "aaaaaaaaaaaa.bbbbbbbbbbbb.cccccccccccc";',
   fakePemPrivateKey,
   'https://user:password@example.test/path',

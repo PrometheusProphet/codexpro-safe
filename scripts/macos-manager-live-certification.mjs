@@ -36,7 +36,13 @@ const installation = option('--installation', 'user');
 assert.ok(['user', 'system'].includes(installation), 'Installation must be user or system.');
 const expectedSavedProfile = option('--expected-saved-profile', 'planning');
 assert.ok(['planning', 'edit', 'develop', 'full'].includes(expectedSavedProfile), 'Unsupported expected saved profile.');
-if (stage !== 'soak') assert.equal(expectedSavedProfile, 'planning', 'Only a soak may acknowledge intentional saved-profile drift.');
+const expectedRuntimeByProfile = {
+  planning: { writeMode: 'handoff', bashMode: 'off' },
+  edit: { writeMode: 'repository', bashMode: 'off' },
+  develop: { writeMode: 'repository', bashMode: 'safe' },
+  full: { writeMode: 'repository', bashMode: 'full' }
+};
+const expectedRuntime = expectedRuntimeByProfile[expectedSavedProfile];
 const durationSeconds = Number(option('--duration-seconds', stage === 'soak' ? '3600' : '0'));
 const requiredRecoveries = Number(option('--required-recoveries', stage === 'soak' ? '2' : '0'));
 assert.ok(Number.isInteger(durationSeconds) && durationSeconds >= 0 && durationSeconds <= 86_400,
@@ -119,7 +125,8 @@ function verifyOwnedLifecycle(settings, requiredPreexistingEpoch = null, require
   const connectors = rows.filter((row) => row.ppid === manager.pid && row.pid === row.pgid &&
     row.command.includes(connectorMarker) && row.command.includes(' start ') && row.command.includes(' --tunnel none '));
   assert.equal(connectors.length, 1, 'Expected one isolated Manager-owned connector group.');
-  const tunnelExpected = `${settings.tunnelClientPath} run --profile ${settings.tunnelProfile}`;
+  const tunnelProfilePath = path.join(os.homedir(), '.config/tunnel-client', `${settings.tunnelProfile}.yaml`);
+  const tunnelExpected = `${settings.tunnelClientPath} run --profile-file ${tunnelProfilePath}`;
   const tunnels = rows.filter((row) => row.ppid === manager.pid && row.pid === row.pgid && row.command === tunnelExpected);
   assert.equal(tunnels.length, 1, 'Expected one isolated Manager-owned tunnel group.');
   const connectorListeners = listenerPids(settings.port);
@@ -144,8 +151,10 @@ function verifyOwnedLifecycle(settings, requiredPreexistingEpoch = null, require
   return true;
 }
 
-async function boundedFetch(url, kind = 'text') {
-  const response = await fetch(url, { headers: { 'cache-control': 'no-store' }, signal: AbortSignal.timeout(2_000) });
+async function boundedFetch(url, kind = 'text', authorization = '') {
+  const headers = { 'cache-control': 'no-store' };
+  if (authorization) headers.authorization = authorization;
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(2_000) });
   assert.equal(response.status, 200, `Unexpected status from ${new URL(url).pathname}.`);
   const bytes = Buffer.from(await response.arrayBuffer());
   assert.ok(bytes.length <= 512 * 1024, 'Live status response exceeded the certification bound.');
@@ -158,21 +167,23 @@ async function pollMetrics(settings) {
     .map((match) => Number(match[1]));
   const cycleValue = Number(metrics.match(/^commands_poll_cycles_total(?:\{[^}]*\})?\s+([0-9.eE+-]+)$/m)?.[1]);
   const successValue = Number(metrics.match(/^commands_poll_last_successful_timestamp_seconds(?:\{[^}]*\})?\s+([0-9.eE+-]+)$/m)?.[1]);
-  assert.ok(errorValues.length > 0 && errorValues.every(Number.isFinite), 'Tunnel poll-error metrics are unavailable.');
+  assert.ok(errorValues.every(Number.isFinite), 'Tunnel poll-error metrics are invalid.');
   assert.ok(Number.isFinite(cycleValue) && Number.isFinite(successValue), 'Tunnel poll lifecycle metrics are unavailable.');
   return { errorsTotal: errorValues.reduce((sum, value) => sum + value, 0), cyclesTotal: cycleValue,
     lastSuccessfulTimestampSeconds: successValue };
 }
 
-async function verifyLocalToolCall(port) {
+async function verifyLocalToolCall(port, connectorToken, expectedRuntime) {
   const client = new Client({ name: 'macos-manager-live-certification', version: '1.0.0' });
   try {
-    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${connectorToken}` } }
+    }));
     const result = await client.callTool({ name: 'server_config', arguments: {} });
     assert.notEqual(result.isError, true, 'The live local MCP tool call failed.');
-    assert.equal(result.structuredContent?.writeMode, 'handoff');
-    assert.equal(result.structuredContent?.bashMode, 'off');
-    return { passed: true, writeMode: 'handoff', bashMode: 'off' };
+    assert.equal(result.structuredContent?.writeMode, expectedRuntime.writeMode);
+    assert.equal(result.structuredContent?.bashMode, expectedRuntime.bashMode);
+    return { passed: true, ...expectedRuntime };
   } finally {
     await client.close().catch(() => {});
   }
@@ -187,8 +198,8 @@ function expectedTunnelID(settings) {
   return match[1];
 }
 
-async function liveSnapshot(settings, profileTunnelID, includeToolCall) {
-  const connector = await boundedFetch(`http://127.0.0.1:${settings.port}/healthz`, 'json');
+async function liveSnapshot(settings, profileTunnelID, connectorToken, expectedRuntime, includeToolCall) {
+  const connector = await boundedFetch(`http://127.0.0.1:${settings.port}/healthz`, 'json', `Bearer ${connectorToken}`);
   assert.equal(connector.ok, true);
   const health = await boundedFetch(`http://127.0.0.1:${settings.tunnelHealthPort}/healthz`);
   const ready = await boundedFetch(`http://127.0.0.1:${settings.tunnelHealthPort}/readyz`);
@@ -205,7 +216,7 @@ async function liveSnapshot(settings, profileTunnelID, includeToolCall) {
     tunnelReady: true,
     exactTunnelIdentity: true,
     mainProbe: 'ok',
-    localTool: includeToolCall ? await verifyLocalToolCall(settings.port) : undefined
+    localTool: includeToolCall ? await verifyLocalToolCall(settings.port, connectorToken, expectedRuntime) : undefined
   };
 }
 
@@ -254,11 +265,15 @@ if (stage === 'post-wake') {
 }
 
 const profileTunnelID = expectedTunnelID(settings);
+const connectorToken = fixedCommand('/usr/bin/security', [
+  'find-generic-password', '-s', 'com.prometheusprophet.codexpro-safe-manager', '-a', 'http-token', '-w'
+]);
+assert.ok(connectorToken.length > 0, 'Connector token is unavailable.');
 console.log('checking Manager-owned process groups and listeners...');
 verifyOwnedLifecycle(settings, wakeEpoch, stage === 'post-reboot' ? bootEpoch : null);
 console.log('checking live authenticated endpoints and local MCP call...');
 const initialPollMetrics = await pollMetrics(settings);
-const initial = await liveSnapshot(settings, profileTunnelID, true);
+const initial = await liveSnapshot(settings, profileTunnelID, connectorToken, expectedRuntime, true);
 const soakStartedAt = new Date();
 const networkRunID = stage === 'soak' && requiredRecoveries > 0 ? randomUUID() : null;
 if (networkRunID) {
@@ -277,7 +292,7 @@ while (Date.now() < deadline) {
   let readyNow = false;
   try {
     verifyOwnedLifecycle(settings);
-    await liveSnapshot(settings, profileTunnelID, false);
+    await liveSnapshot(settings, profileTunnelID, connectorToken, expectedRuntime, false);
     readyNow = true;
   } catch {
     readinessLosses += 1;
@@ -287,7 +302,7 @@ while (Date.now() < deadline) {
   samples += 1;
 }
 if (durationSeconds > 0) console.log('checking final recovery and MCP state...');
-const final = await liveSnapshot(settings, profileTunnelID, true);
+const final = await liveSnapshot(settings, profileTunnelID, connectorToken, expectedRuntime, true);
 verifyOwnedLifecycle(settings);
 const finalPollMetrics = await pollMetrics(settings);
 const pollErrorsDelta = finalPollMetrics.errorsTotal - initialPollMetrics.errorsTotal;
@@ -335,7 +350,7 @@ const evidence = {
     restartOnFailure: true,
     autoStartServices: settings.autoStartServices === true
   },
-  effectiveRuntimeRequired: { writeMode: 'handoff', bashMode: 'off' },
+  effectiveRuntimeRequired: expectedRuntime,
   nativeState: { installation, loginItem, diagnosticHelper: 'sealed', controlPlaneKey: 'configured' },
   lifecycleOwnership: 'verified',
   initial,

@@ -94,6 +94,8 @@ codexpro start \
 - Do not run public tunnels with `--no-auth`.
 - Public tunnel mode and non-loopback binds fail closed if `CODEXPRO_HTTP_TOKEN` is missing.
 - Prefer `Authorization: Bearer <token>`. Query-token URLs are disabled by default; use `CODEXPRO_ALLOW_QUERY_TOKEN=1` or `--allow-query-token` only for compatibility.
+- The macOS Manager may use `X-CodexPro-Manager-Token` with the same Keychain-backed token for its origin-scoped tunnel-client traffic. Never persist the literal header value in the tunnel profile or logs.
+- Unauthenticated `GET` requests under `/.well-known/oauth-protected-resource` are allowed to reach routing so an absent OAuth metadata document returns `404`; no protected connector content is exposed there.
 - Do not commit printed connector URLs that include `codexpro_token`.
 - Do not commit Cloudflare tunnel tokens.
 - Use `--mode handoff` for planning workflows where ChatGPT should not edit source files.

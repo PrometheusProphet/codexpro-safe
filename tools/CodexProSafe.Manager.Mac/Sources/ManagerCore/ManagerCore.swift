@@ -152,8 +152,8 @@ public enum TunnelReadiness {
         return status.channels.contains { $0.name == "main" && $0.probe_status?.lowercased() == "ok" }
     }
 
-    public static func expectedTunnelID(profile: String, environment: [String: String] = ProcessInfo.processInfo.environment,
-                                        fileManager: FileManager = .default) -> String? {
+    public static func profileURL(profile: String,
+                                  environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
         guard profile.range(of: #"^[A-Za-z0-9_.-]{1,100}$"#, options: .regularExpression) != nil else { return nil }
         let directory: String
         if let override = environment["TUNNEL_CLIENT_PROFILE_DIR"], !override.isEmpty {
@@ -165,7 +165,12 @@ public enum TunnelReadiness {
             directory = FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".config/tunnel-client").path
         }
-        let url = URL(fileURLWithPath: directory).appendingPathComponent("\(profile).yaml")
+        return URL(fileURLWithPath: directory).appendingPathComponent("\(profile).yaml")
+    }
+
+    public static func expectedTunnelID(profile: String, environment: [String: String] = ProcessInfo.processInfo.environment,
+                                        fileManager: FileManager = .default) -> String? {
+        guard let url = profileURL(profile: profile, environment: environment) else { return nil }
         guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
               let size = attributes[.size] as? NSNumber, size.intValue <= 65_536,
               let content = try? String(contentsOf: url, encoding: .utf8),

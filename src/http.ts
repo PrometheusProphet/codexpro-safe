@@ -276,7 +276,7 @@ function corsOriginPolicy(config: CodexProConfig): express.RequestHandler {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, X-CodexPro-Manager-Token, Content-Type, Mcp-Session-Id");
     res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
     if (req.method === "OPTIONS") {
       res.status(204).end();
@@ -324,8 +324,18 @@ async function main(): Promise<void> {
       next();
       return;
     }
+    const publicOAuthDiscoveryMiss = req.method === "GET" &&
+      (req.path === "/.well-known/oauth-protected-resource" ||
+        req.path.startsWith("/.well-known/oauth-protected-resource/"));
+    if (publicOAuthDiscoveryMiss) {
+      next();
+      return;
+    }
     const bearer = req.headers.authorization?.startsWith("Bearer ")
       ? req.headers.authorization.slice("Bearer ".length)
+      : undefined;
+    const managerToken = typeof req.headers["x-codexpro-manager-token"] === "string"
+      ? req.headers["x-codexpro-manager-token"]
       : undefined;
     const queryToken = typeof req.query.codexpro_token === "string"
       ? req.query.codexpro_token
@@ -333,7 +343,7 @@ async function main(): Promise<void> {
         ? req.query.token
         : undefined;
     const acceptedQueryToken = config.allowQueryToken ? queryToken : undefined;
-    if (!tokenMatches(bearer) && !tokenMatches(acceptedQueryToken)) {
+    if (!tokenMatches(bearer) && !tokenMatches(managerToken) && !tokenMatches(acceptedQueryToken)) {
       res.status(401).send("Unauthorized");
       return;
     }

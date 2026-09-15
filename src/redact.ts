@@ -1,6 +1,7 @@
 const OPENAI_SECRET_PATTERN = /\bsk-[A-Za-z0-9_-]{10,}\b/g;
 const SECRET_ASSIGNMENT_PATTERN = /\b[A-Za-z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PRIVATE[_-]?KEY)[A-Za-z0-9_]*\s*=\s*(?:"[^"\r\n]{12,}"|'[^'\r\n]{12,}'|`[^`\r\n]{12,}`|[A-Za-z0-9_./+=-]{20,})/gi;
 const AUTHORIZATION_HEADER_PATTERN = /\b(Authorization\s*:\s*)([A-Za-z]+)\s+([^\s"'`<>]+)/gi;
+const MANAGER_TOKEN_HEADER_PATTERN = /\b(X-CodexPro-Manager-Token\s*:\s*)([^\s"'`<>]+)/gi;
 const JWT_PATTERN = /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
 const PEM_PRIVATE_KEY_PATTERN = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 const LONG_BASE64ISH_PATTERN = /\b(?:[A-Za-z0-9+/]{96,}={0,2}|[A-Za-z0-9_-]{96,})\b/g;
@@ -38,6 +39,7 @@ export function redactSensitiveTextWithCount(text: string): RedactionResult {
   replaceSecret(PEM_PRIVATE_KEY_PATTERN, (match) => redactPemBlock(String(match)));
   replaceSecret(SECRET_ASSIGNMENT_PATTERN, (match) => redactSecretAssignment(String(match)));
   replaceSecret(AUTHORIZATION_HEADER_PATTERN, (_match, prefix, scheme) => `${prefix}${scheme} [REDACTED_SECRET]`);
+  replaceSecret(MANAGER_TOKEN_HEADER_PATTERN, (_match, prefix) => `${prefix}[REDACTED_SECRET]`);
   replaceSecret(CREDENTIALED_URL_PATTERN, (_match, scheme) => `${scheme}[REDACTED_SECRET]@`);
   replaceSecret(URL_QUERY_SECRET_PATTERN, (_match, prefix) => `${prefix}[REDACTED_SECRET]`);
   replaceSecret(JWT_PATTERN, () => "[REDACTED_SECRET]");

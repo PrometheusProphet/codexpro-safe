@@ -145,6 +145,27 @@ tunnel-client init \
 tunnel-client doctor --profile codexpro-safe-local --explain
 ```
 
+For a connector bearer token stored by the Manager, add the following references
+to the profile's existing `mcp` section. The profile stores no credential; the
+Manager supplies the referenced value only to its doctor and tunnel processes:
+
+```yaml
+mcp:
+  extra_headers:
+    X-CodexPro-Manager-Token: env:CODEXPRO_MANAGER_CONNECTOR_TOKEN
+  discovery_extra_headers:
+    X-CodexPro-Manager-Token: env:CODEXPRO_MANAGER_CONNECTOR_TOKEN
+```
+
+Both header maps are required: `extra_headers` authenticates forwarded MCP
+traffic, while `discovery_extra_headers` authenticates OAuth discovery and the
+startup initialize probe. Keep the connector token in Keychain rather than
+placing a literal bearer value in this profile.
+
+The Manager validates the selected profile name and launches the tunnel client
+with the exact resolved profile file. This keeps environment-backed header
+references effective across tunnel-client profile-loading modes.
+
 In Manager Settings, select **OpenAI Secure MCP Tunnel**, choose the exact
 client binary, enter the profile and health port, optionally enter the owning
 `org-...` ID, and save the runtime key using **Save OpenAI Runtime Key**. Saving
