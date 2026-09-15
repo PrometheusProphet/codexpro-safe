@@ -294,13 +294,13 @@ npm run manager:mac:certify-live -- --stage soak \
   --duration-seconds 3600 --required-recoveries 2
 ```
 
-If another operator intentionally saves a broader profile without restarting
-the live Planning connector, a soak may acknowledge that exact saved value with
-`--expected-saved-profile`. The runner records the saved setting separately and
-still requires both initial and final MCP calls to prove effective `handoff`
-writes and Bash off. A restart that applies the broader profile therefore fails
-the soak rather than silently weakening certification. Non-soak checkpoints
-always require the saved Planning profile.
+The runner defaults to Planning. When another profile is intentional, pass its
+exact saved value with `--expected-saved-profile planning|edit|develop|full`.
+Every checkpoint records that choice and requires both initial and final MCP
+calls to prove the corresponding effective write and Bash modes. For example,
+`--expected-saved-profile develop` requires repository writes and Safe Bash;
+an unexpected runtime profile fails certification rather than silently changing
+the access boundary.
 
 `baseline` fails unless Planning mode, connector auto-start off, and Launch at
 Login off are preserved. `post-reboot` is intentionally different: enable both
