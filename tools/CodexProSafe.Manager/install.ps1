@@ -41,7 +41,14 @@ function Copy-VerifiedFile {
         Remove-Item -LiteralPath $temporary -Force
         throw "Staged package fingerprint verification failed."
     }
-    Move-Item -LiteralPath $temporary -Destination $Destination -Force
+    if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+        $replaceBackup = $Destination + '.old-' + [Guid]::NewGuid().ToString('N')
+        [System.IO.File]::Replace($temporary, $Destination, $replaceBackup, $true)
+        Remove-Item -LiteralPath $replaceBackup -Force
+    }
+    else {
+        Move-Item -LiteralPath $temporary -Destination $Destination
+    }
 }
 
 function Save-RollbackPackage {
