@@ -10,6 +10,8 @@
     <string>CodexProSafeManager</string>
     <key>CFBundleIdentifier</key>
     <string>com.prometheusprophet.codexpro-safe-manager</string>
+    <key>CFBundleIconFile</key>
+    <string>CodexProSafeManager.icns</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

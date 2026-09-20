@@ -21,6 +21,7 @@ zip_path="$output_root/CodexPro-Safe-Manager-$version-macOS-universal.zip"
 pkg_path="$output_root/CodexPro-Safe-Manager-$version-macOS-universal.pkg"
 checksum_path="$output_root/SHA256SUMS"
 plist_source="$package_root/Resources/Info.plist"
+icon_source="$package_root/Resources/CodexProSafeManagerIcon.png"
 
 if [[ ! "$build_number" =~ ^[1-9][0-9]*$ ]]; then
   echo "CODEXPRO_MAC_BUILD_NUMBER must be a positive integer." >&2
@@ -58,6 +59,26 @@ cp "$plist_source" "$staged_app/Contents/Info.plist"
 install -m 0755 "$binary_root/CodexProSafeManager" "$staged_app/Contents/MacOS/CodexProSafeManager"
 install -m 0755 "$binary_root/CodexProSafeLauncher" "$staged_app/Contents/MacOS/CodexProSafeLauncher"
 install -m 0755 "$binary_root/CodexProSafeDiagnosticHelper" "$staged_app/Contents/MacOS/CodexProSafeDiagnosticHelper"
+
+iconset="$temporary_root/CodexProSafeManager.iconset"
+mkdir -p "$iconset"
+while read -r points scale pixels; do
+  output="$iconset/icon_${points}x${points}"
+  if [[ "$scale" == "2" ]]; then output="${output}@2x"; fi
+  sips -z "$pixels" "$pixels" "$icon_source" --out "$output.png" >/dev/null
+done <<'SIZES'
+16 1 16
+16 2 32
+32 1 32
+32 2 64
+128 1 128
+128 2 256
+256 1 256
+256 2 512
+512 1 512
+512 2 1024
+SIZES
+iconutil -c icns "$iconset" -o "$staged_app/Contents/Resources/CodexProSafeManager.icns"
 
 sign_options=(--force --options runtime --sign "$app_identity")
 if [[ "$app_identity" != "-" ]]; then sign_options+=(--timestamp); fi

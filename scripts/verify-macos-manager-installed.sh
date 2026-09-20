@@ -11,6 +11,8 @@ manager_binary="$installed_app/Contents/MacOS/CodexProSafeManager"
 settings_file="$HOME/Library/Application Support/CodexProSafe Manager/settings.json"
 
 test -x "$manager_binary"
+test -f "$installed_app/Contents/Resources/CodexProSafeManager.icns"
+test "$(defaults read "$installed_app/Contents/Info" CFBundleIconFile)" = "CodexProSafeManager.icns"
 codesign --verify --deep --strict "$installed_app"
 test "$("$manager_binary" --diagnostic-helper-status)" = "sealed"
 test -f "$settings_file"
