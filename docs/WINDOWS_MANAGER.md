@@ -5,6 +5,9 @@ running the CodexPro-Safe connector and the OpenAI tunnel client as one
 lifecycle. It provides **Start All**, **Restart All**, and **Stop All** controls,
 automatic startup at Windows sign-in, supervised recovery, and combined logs.
 
+The Windows 2.0 donor inventory and platform disposition are recorded in
+[Windows Manager 2.0 provenance and disposition](WINDOWS_MANAGER_2_0_PROVENANCE.md).
+
 The names have different scopes:
 
 - **CodexPro-Safe** is the connector, repository, and package.
@@ -49,6 +52,20 @@ powershell.exe -ExecutionPolicy Bypass -File .\tools\CodexProSafe.Manager\instal
 
 Exit a running Manager before installation. The installer refuses to replace or
 reseal the helper package while that lifecycle owner is active.
+
+An update first saves a fingerprinted copy of the installed Manager, helper,
+manifest, and opaque DPAPI settings bytes under the installed `Rollback`
+directory. It does not decrypt the settings. With the Manager exited, restore
+the newest verified snapshot with:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\tools\CodexProSafe.Manager\install.ps1 -Rollback
+```
+
+Rollback also saves the package being replaced as a recovery snapshot. Neither
+install nor rollback proves live connector/tunnel health; after an approved
+operation, verify safe status, controlled lifecycle, authenticated readiness,
+and real plugin calls separately.
 
 The installer creates **CodexPro-Safe Manager** on the Windows Desktop and
 installs the executable under:
@@ -281,6 +298,14 @@ After that:
 - Closing the window minimizes the Manager to the notification area.
 - Exiting the Manager asks whether to stop services that it owns.
 
+Stop and restart are identity-bound operations. Before termination, the Manager
+captures the verified root PID, creation time, and its current descendants. A
+nonzero or timed-out `taskkill` is accepted only when that exact process tree is
+already gone; a zero exit is accepted only when the captured tree is gone and
+the corresponding loopback endpoint has also stopped. A reused PID is never
+treated as the original process. This makes repeated Stop safe while preserving
+the exact-match takeover boundary.
+
 “Ready” means more than an open local port. The Manager checks authenticated
 tunnel metadata, confirms that the tunnel ID matches the configured profile,
 and requires the main channel probe to report `ok`.
@@ -314,6 +339,11 @@ services, and create or repoint the plugin to the new tunnel.
 | `tunnel_use_forbidden` | The key's principal cannot use the selected tunnel. | Grant that principal access or create a tunnel with the same project/principal used by the runtime key. |
 | The old plugin returns `404` or a terminated session | The plugin still targets an old or deleted tunnel. | Create or repoint **CodexPro-Safe Manager**, verify it, remove the stale plugin, and restart Codex. |
 | Local ports are open but the tunnel is faulted | The process is running but control-plane authentication or the main channel probe failed. | Read the Manager log; do not treat the open port alone as ready. |
+| `taskkill_timeout` | Windows did not complete the bounded tree stop and the verified root still exists. | Leave the Manager running, close software holding the process, then retry. Do not kill an unverified PID. |
+| `access_denied` | Windows refused termination rights for the verified tree. | Run the Manager under the same Windows account and integrity level that started the service, then retry the confirmed stop. |
+| `pid_reused` | The original process exited while its numeric PID was assigned to a different process. | Retry so the Manager performs fresh listener and process verification; never target the replacement manually from this message. |
+| `lingering_descendant` | The verified root exited but at least one captured child remained. | Preserve the log category, close the remaining owner through its normal application when possible, then retry after fresh verification. |
+| `endpoint_still_live` | The verified tree stopped but another process still serves the endpoint. | Use a fresh status/takeover check. The Manager will not assume the new listener is related. |
 
 Use **Open Logs** for the combined lifecycle log and **Open Tunnel UI** for the
 local tunnel status page. Never paste unredacted credentials into a chat, issue,

@@ -100,6 +100,14 @@ The app asks you to stop manager-owned services before exiting so redirected
 logs and child shutdown remain deterministic. Externally started services are
 never changed merely because the manager exits.
 
+Each stop is bound to the verified PID and creation time. The Manager treats an
+already-exited process as an idempotent success, refuses PID reuse, verifies
+captured descendants are gone, and waits for the service endpoint to stop
+before reporting completion. Failures use fixed categories such as
+`taskkill_timeout`, `access_denied`, `pid_reused`, `lingering_descendant`, and
+`endpoint_still_live`; they do not include command output or broad process
+details.
+
 Tunnel readiness requires authenticated control-plane metadata, a tunnel ID
 matching the configured profile, and an `ok` main-channel probe. A listening
 local port by itself is not reported as ready.
@@ -115,6 +123,14 @@ creates **CodexPro-Safe Manager** on the Windows Desktop:
 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File .\tools\CodexProSafe.Manager\install.ps1
+```
+
+Updates preserve a fingerprinted rollback copy of the installed executable,
+helper, manifest, and opaque DPAPI settings bytes without decrypting them. With
+the Manager exited, restore the newest verified snapshot with:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\tools\CodexProSafe.Manager\install.ps1 -Rollback
 ```
 
 The installed application lives under:

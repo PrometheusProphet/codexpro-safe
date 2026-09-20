@@ -338,9 +338,10 @@ namespace CodexProSafeManager
             }
             if (IsAlive(connector))
             {
-                int pid = connector.Id;
-                KillTree(pid);
+                VerifiedProcessIdentity identity = VerifiedProcessTreeTerminator.Capture(connector);
+                StopVerifiedTree(identity);
                 await WaitForExitAsync(connector, 5000);
+                await VerifyEndpointStoppedAsync("http://127.0.0.1:8787/healthz");
                 connector.Dispose();
                 connector = null;
                 ReleaseDiagnosticHelperLock();
@@ -351,11 +352,11 @@ namespace CodexProSafeManager
             if (!allowExactTakeover)
                 throw new InvalidOperationException("Connector is running outside the manager. Use the confirmed exact-process takeover.");
             int portPid = FindListeningProcessId(8787);
-            int ownerPid = FindMatchingConnectorOwner(portPid);
-            if (ownerPid <= 0)
+            ProcessIdentity owner = FindMatchingConnectorOwner(portPid);
+            if (owner == null)
                 throw new InvalidOperationException("Refused to stop the external connector because its exact owner could not be verified.");
-            KillTree(ownerPid);
-            await WaitForProbeToStopAsync("http://127.0.0.1:8787/healthz", 8000);
+            StopVerifiedTree(VerifiedProcessTreeTerminator.Capture(owner.ProcessId, owner.StartUtc));
+            await VerifyEndpointStoppedAsync("http://127.0.0.1:8787/healthz");
             Emit("manager", "Stopped the exact matching external connector.");
         }
 
@@ -363,9 +364,10 @@ namespace CodexProSafeManager
         {
             if (IsAlive(tunnel))
             {
-                int pid = tunnel.Id;
-                KillTree(pid);
+                VerifiedProcessIdentity verified = VerifiedProcessTreeTerminator.Capture(tunnel);
+                StopVerifiedTree(verified);
                 await WaitForExitAsync(tunnel, 5000);
+                await VerifyEndpointStoppedAsync("http://127.0.0.1:8080/healthz");
                 tunnel.Dispose();
                 tunnel = null;
                 Emit("manager", "Stopped managed tunnel.");
@@ -382,33 +384,33 @@ namespace CodexProSafeManager
             {
                 throw new InvalidOperationException("Refused to stop the external tunnel because its executable and profile did not exactly match.");
             }
-            KillTree(portPid);
-            await WaitForProbeToStopAsync("http://127.0.0.1:8080/healthz", 8000);
+            StopVerifiedTree(VerifiedProcessTreeTerminator.Capture(identity.ProcessId, identity.StartUtc));
+            await VerifyEndpointStoppedAsync("http://127.0.0.1:8080/healthz");
             Emit("manager", "Stopped the exact matching external tunnel.");
         }
 
-        private int FindMatchingConnectorOwner(int portPid)
+        private ProcessIdentity FindMatchingConnectorOwner(int portPid)
         {
-            if (settings.CodexDiagnosticReadMode == "read") return -1;
+            if (settings.CodexDiagnosticReadMode == "read") return null;
             return FindMatchingConnectorOwner(settings, portPid);
         }
 
-        private static int FindMatchingConnectorOwner(AppSettings value, int portPid)
+        private static ProcessIdentity FindMatchingConnectorOwner(AppSettings value, int portPid)
         {
-            if (portPid <= 0) return -1;
+            if (portPid <= 0) return null;
             ProcessIdentity child = GetIdentity(portPid);
             if (child == null || !String.Equals(child.Name, "node.exe", StringComparison.OrdinalIgnoreCase))
-                return -1;
+                return null;
             ProcessIdentity parent = GetIdentity(child.ParentProcessId);
             string script = Path.Combine(value.RepositoryPath, @"scripts\codexpro.mjs");
             if (parent == null || !String.Equals(parent.Name, "node.exe", StringComparison.OrdinalIgnoreCase))
-                return -1;
-            if (!ContainsPathOrRelativeScript(parent.CommandLine, script)) return -1;
-            if (!ContainsArgument(parent.CommandLine, "--root", value.WorkspaceRoot)) return -1;
-            if (!ContainsArgument(parent.CommandLine, "--allow-root", value.AllowedRoot)) return -1;
-            if (!ContainsArgument(parent.CommandLine, "--tunnel", "none")) return -1;
-            if (!MatchesConfiguredConnectorCommandLine(value, parent.CommandLine)) return -1;
-            return parent.ProcessId;
+                return null;
+            if (!ContainsPathOrRelativeScript(parent.CommandLine, script)) return null;
+            if (!ContainsArgument(parent.CommandLine, "--root", value.WorkspaceRoot)) return null;
+            if (!ContainsArgument(parent.CommandLine, "--allow-root", value.AllowedRoot)) return null;
+            if (!ContainsArgument(parent.CommandLine, "--tunnel", "none")) return null;
+            if (!MatchesConfiguredConnectorCommandLine(value, parent.CommandLine)) return null;
+            return parent;
         }
 
         internal static bool MatchesConfiguredConnectorCommandLine(AppSettings value, string commandLine)
@@ -537,6 +539,28 @@ namespace CodexProSafeManager
             throw new InvalidOperationException("Service endpoint remained available after its verified process was stopped.");
         }
 
+        private static void StopVerifiedTree(VerifiedProcessIdentity identity)
+        {
+            ProcessStopAssessment result = VerifiedProcessTreeTerminator.Stop(identity);
+            if (!result.Succeeded)
+                throw new InvalidOperationException(VerifiedProcessTreeTerminator.FailureMessage(result.Failure));
+        }
+
+        private static async Task VerifyEndpointStoppedAsync(string url)
+        {
+            try
+            {
+                await WaitForProbeToStopAsync(url, 8000);
+            }
+            catch (InvalidOperationException)
+            {
+                ProcessStopAssessment result = VerifiedProcessTreeTerminator.WithEndpointState(
+                    new ProcessStopAssessment { Failure = ProcessStopFailure.None },
+                    true);
+                throw new InvalidOperationException(VerifiedProcessTreeTerminator.FailureMessage(result.Failure));
+            }
+        }
+
         private static async Task WaitForExitAsync(Process process, int timeoutMs)
         {
             Stopwatch watch = Stopwatch.StartNew();
@@ -576,20 +600,6 @@ namespace CodexProSafeManager
             return false;
         }
 
-        private static void KillTree(int pid)
-        {
-            ProcessStartInfo start = new ProcessStartInfo();
-            start.FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "taskkill.exe");
-            start.Arguments = "/PID " + pid + " /T /F";
-            start.UseShellExecute = false;
-            start.CreateNoWindow = true;
-            using (Process killer = Process.Start(start))
-            {
-                if (!killer.WaitForExit(8000) || killer.ExitCode != 0)
-                    throw new InvalidOperationException("Windows could not stop verified process tree " + pid + ".");
-            }
-        }
-
         internal static int FindListeningProcessId(int port)
         {
             ProcessStartInfo start = new ProcessStartInfo();
@@ -625,7 +635,7 @@ namespace CodexProSafeManager
         private static ProcessIdentity GetIdentity(int pid)
         {
             if (pid <= 0) return null;
-            string query = "SELECT ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine FROM Win32_Process WHERE ProcessId=" + pid;
+            string query = "SELECT ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine, CreationDate FROM Win32_Process WHERE ProcessId=" + pid;
             using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(query))
             using (ManagementObjectCollection results = searcher.Get())
             {
@@ -637,7 +647,8 @@ namespace CodexProSafeManager
                         ParentProcessId = Convert.ToInt32(item["ParentProcessId"]),
                         Name = Convert.ToString(item["Name"]),
                         ExecutablePath = Convert.ToString(item["ExecutablePath"]),
-                        CommandLine = Convert.ToString(item["CommandLine"])
+                        CommandLine = Convert.ToString(item["CommandLine"]),
+                        StartUtc = ManagementDateTimeConverter.ToDateTime(Convert.ToString(item["CreationDate"])).ToUniversalTime()
                     };
                 }
             }
@@ -673,6 +684,7 @@ namespace CodexProSafeManager
             public string Name { get; set; }
             public string ExecutablePath { get; set; }
             public string CommandLine { get; set; }
+            public DateTime StartUtc { get; set; }
         }
     }
 }

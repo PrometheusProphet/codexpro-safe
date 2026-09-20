@@ -15,7 +15,7 @@ $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($installer, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count -ne 0) { throw 'Manager installer did not parse.' }
 $parameterNames = @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
-$expectedParameters = @('NoBuild', 'NoLaunch', 'CodexDiagnostics')
+$expectedParameters = @('NoBuild', 'NoLaunch', 'Rollback', 'CodexDiagnostics')
 if (@($parameterNames | Where-Object { $_ -notin $expectedParameters }).Count -ne 0 -or
     @($expectedParameters | Where-Object { $_ -notin $parameterNames }).Count -ne 0) {
     throw 'Manager installer exposed an unexpected parameter surface.'
@@ -24,6 +24,20 @@ $installerText = Get-Content -LiteralPath $installer -Raw
 if ($installerText -notmatch "\[ValidateSet\('off',\s*'read'\)\]" -or
     $installerText -notmatch "--set-codex-diagnostics") {
     throw 'Manager installer did not retain the fixed diagnostic-mode contract.'
+}
+foreach ($requiredRollbackBoundary in @(
+    'codexpro-manager-rollback-v1',
+    'Get-Sha256Hex',
+    'settingsSha256',
+    'settingsSddl',
+    "Get-Process -Name 'CodexProSafe.Manager'"
+)) {
+    if ($installerText.IndexOf($requiredRollbackBoundary, [StringComparison]::Ordinal) -lt 0) {
+        throw "Manager installer rollback boundary is missing $requiredRollbackBoundary."
+    }
+}
+if ($installerText -match 'Unprotect|ProtectedData::Unprotect|ConvertTo-SecureString') {
+    throw 'Manager installer rollback must not decrypt or reinterpret saved settings.'
 }
 
 $programText = Get-Content -LiteralPath $program -Raw

@@ -8,6 +8,8 @@ namespace CodexProSafeManager
 {
     internal static class SelfTestProgram
     {
+        private static string currentStage = "core-defaults";
+
         public static int Run()
         {
             try
@@ -21,7 +23,15 @@ namespace CodexProSafeManager
                 settings.AllowedRoot = @"C:\Users\test\Projects";
                 settings.TunnelProfile = "codexpro-safe-local";
                 settings.CodexDiagnosticReadMode = "read";
-                DiagnosticHelperTrust.SealInstalledPackage(settings, System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
+                try
+                {
+                    DiagnosticHelperTrust.SealInstalledPackage(settings, System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
+                }
+                catch (InvalidOperationException error)
+                {
+                    currentStage = "diagnostic-helper-seal-" + DiagnosticSealFailureCode(error.Message);
+                    throw;
+                }
 
                 string connector = ProcessSupervisor.BuildConnectorArguments(settings);
                 Assert(connector.Contains("\"C:\\repo with spaces\\codexpro-safe\\scripts\\codexpro.mjs\""), "connector script quoting");
@@ -44,16 +54,30 @@ namespace CodexProSafeManager
                 settings.ConnectorAccessMode = "invalid";
                 AssertThrows(delegate { settings.GetConnectorAccessProfile(); }, "invalid access rejected");
                 settings.ConnectorAccessMode = "planning";
+                currentStage = "lifecycle-termination";
+                RunLifecycleTerminationTests();
+                currentStage = "diagnostic-helper-seal";
                 string syntheticPipe = "codexpro-safe-diagnostic-0123456789abcdef0123456789abcdef";
                 string syntheticGate = "codexpro-safe-diagnostic-gate-0123456789abcdef0123456789abcdef";
                 System.Collections.Generic.IDictionary<string, string> helperEnvironment = ProcessSupervisor.BuildConnectorEnvironment(settings, syntheticPipe, syntheticGate);
                 Assert(helperEnvironment.Count == 2 && helperEnvironment["CODEXPRO_DIAGNOSTIC_MANAGER_PIPE"] == syntheticPipe &&
                     helperEnvironment["CODEXPRO_DIAGNOSTIC_MANAGER_GATE"] == syntheticGate, "manager proof environment locators only");
                 Assert(!helperEnvironment.ContainsKey("CODEXPRO_DIAGNOSTIC_HELPER_PATH"), "helper path not transported by environment");
+                currentStage = "diagnostic-helper-lock";
                 using (DiagnosticHelperLock helperLock = DiagnosticHelperTrust.OpenVerifiedLock(settings, System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName))
                 {
                     Assert(helperLock.Length > 0, "helper verified lock");
-                    DiagnosticLaunchProofSelfTest.Run(settings, System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
+                    currentStage = "diagnostic-launch-proof";
+                    try
+                    {
+                        DiagnosticLaunchProofSelfTest.Run(settings, System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
+                    }
+                    catch
+                    {
+                        currentStage = "diagnostic-launch-proof-" + (DiagnosticLaunchProofSelfTest.LastStage ?? "unknown");
+                        throw;
+                    }
+                    currentStage = "diagnostic-helper-execute";
                     System.Diagnostics.ProcessStartInfo helperStart = new System.Diagnostics.ProcessStartInfo();
                     helperStart.FileName = settings.DiagnosticHelperPath;
                     helperStart.Arguments = "--self-test";
@@ -65,6 +89,7 @@ namespace CodexProSafeManager
                     }
                 }
                 string sealedHash = settings.DiagnosticHelperSha256;
+                currentStage = "diagnostic-helper-negative-contracts";
                 settings.DiagnosticHelperSha256 = new string('0', 64);
                 AssertThrows(delegate { using (DiagnosticHelperLock ignored = DiagnosticHelperTrust.OpenVerifiedLock(settings, System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName)) { } }, "helper fingerprint mismatch");
                 settings.DiagnosticHelperSha256 = sealedHash;
@@ -73,6 +98,7 @@ namespace CodexProSafeManager
                 settings.DiagnosticHelperProtocolVersion = DiagnosticHelperTrust.ProtocolVersion;
 
                 string reparseTest = Path.Combine(Path.GetTempPath(), "CodexProSafe.Manager.reparse." + Guid.NewGuid().ToString("N"));
+                currentStage = "diagnostic-helper-reparse";
                 Directory.CreateDirectory(reparseTest);
                 try
                 {
@@ -103,6 +129,7 @@ namespace CodexProSafeManager
                 }
 
                 string secret = "fake-redaction-secret-value-123456789";
+                currentStage = "privacy-redaction";
                 string sanitized = LogWriter.Sanitize("api_key=" + secret + " Authorization: Bearer " + secret);
                 Assert(!sanitized.Contains(secret), "secret redaction");
                 Assert(sanitized.Contains("<redacted>") || sanitized.Contains("<redacted-key>"), "redaction marker");
@@ -116,9 +143,79 @@ namespace CodexProSafeManager
             catch
             {
                 string reportPath = Path.Combine(Path.GetTempPath(), "CodexProSafe.Manager.self-test.txt");
-                File.WriteAllText(reportPath, "FAIL " + (OperationalPrivacySelfTest.LastStage ?? "core"));
+                string privacyStage = OperationalPrivacySelfTest.LastStage;
+                File.WriteAllText(reportPath, "FAIL " + (String.IsNullOrWhiteSpace(privacyStage) ? currentStage : privacyStage));
                 return 1;
             }
+        }
+
+        private static void RunLifecycleTerminationTests()
+        {
+            ProcessStopAssessment alreadyExited = ProcessStopAssessment.Classify(
+                ProcessStopCommandState.Failed, ProcessIdentityState.Missing, false, false, false);
+            Assert(alreadyExited.Succeeded && alreadyExited.AlreadyExited, "already-exited stop succeeds");
+
+            ProcessStopAssessment repeatedStop = ProcessStopAssessment.Classify(
+                ProcessStopCommandState.Failed, ProcessIdentityState.Missing, false, false, false);
+            Assert(repeatedStop.Succeeded && repeatedStop.CommandAnomalyRecovered, "repeated stop is idempotent");
+
+            ProcessStopAssessment timeout = ProcessStopAssessment.Classify(
+                ProcessStopCommandState.TimedOut, ProcessIdentityState.Matching, false, false, false);
+            Assert(timeout.Failure == ProcessStopFailure.CommandTimedOut, "taskkill timeout classified");
+
+            ProcessStopAssessment timeoutRace = ProcessStopAssessment.Classify(
+                ProcessStopCommandState.TimedOut, ProcessIdentityState.Missing, false, false, false);
+            Assert(timeoutRace.Succeeded && timeoutRace.CommandAnomalyRecovered, "timeout after exit recovered");
+
+            ProcessStopAssessment access = ProcessStopAssessment.Classify(
+                ProcessStopCommandState.Failed, ProcessIdentityState.Matching, true, false, false);
+            Assert(access.Failure == ProcessStopFailure.AccessDenied, "access denial classified");
+
+            ProcessStopAssessment reused = ProcessStopAssessment.Classify(
+                ProcessStopCommandState.Failed, ProcessIdentityState.Reused, false, false, false);
+            Assert(reused.Failure == ProcessStopFailure.PidReused, "PID reuse refused");
+
+            ProcessStopAssessment partial = ProcessStopAssessment.Classify(
+                ProcessStopCommandState.Succeeded, ProcessIdentityState.Missing, false, true, false);
+            Assert(partial.Failure == ProcessStopFailure.LingeringDescendant, "partial tree shutdown classified");
+
+            ProcessStopAssessment endpoint = ProcessStopAssessment.Classify(
+                ProcessStopCommandState.Succeeded, ProcessIdentityState.Missing, false, false, true);
+            Assert(endpoint.Failure == ProcessStopFailure.EndpointStillLive, "endpoint-still-live classified");
+
+            ProcessStopAssessment commandFailure = ProcessStopAssessment.Classify(
+                ProcessStopCommandState.Failed, ProcessIdentityState.Matching, false, false, false);
+            Assert(commandFailure.Failure == ProcessStopFailure.CommandFailed, "taskkill failure classified");
+
+            foreach (ProcessStopFailure failure in new[]
+            {
+                ProcessStopFailure.AccessDenied,
+                ProcessStopFailure.CommandFailed,
+                ProcessStopFailure.CommandTimedOut,
+                ProcessStopFailure.IdentityUnavailable,
+                ProcessStopFailure.PidReused,
+                ProcessStopFailure.LingeringDescendant,
+                ProcessStopFailure.EndpointStillLive
+            })
+            {
+                string message = VerifiedProcessTreeTerminator.FailureMessage(failure);
+                Assert(!String.IsNullOrWhiteSpace(message) && !message.Contains("System."), "sanitized stop failure " + failure);
+            }
+        }
+
+        private static string DiagnosticSealFailureCode(string message)
+        {
+            if (message == null) return "unknown";
+            if (message.Contains("incomplete")) return "incomplete";
+            if (message.Contains("manifest")) return "manifest";
+            if (message.Contains("opened safely")) return "open";
+            if (message.Contains("reparse point")) return "reparse";
+            if (message.Contains("hard-link")) return "hard-link";
+            if (message.Contains("resolved outside")) return "path";
+            if (message.Contains("attributes")) return "attributes";
+            if (message.Contains("identity")) return "identity";
+            if (message.Contains("fingerprint")) return "fingerprint";
+            return "unknown";
         }
 
         private static void Assert(bool condition, string name)

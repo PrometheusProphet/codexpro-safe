@@ -451,8 +451,11 @@ namespace CodexProSafeManager
 
     internal static class DiagnosticLaunchProofSelfTest
     {
+        internal static string LastStage { get; private set; }
+
         internal static void Run(AppSettings settings, string executable)
         {
+            LastStage = "valid-instance";
             string repository = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(executable))));
             string expectedServerScript = Path.Combine(repository, @"dist\http.js");
             using (DiagnosticLaunchBroker valid = new DiagnosticLaunchBroker(settings, executable, executable, repository, 3000, 2))
@@ -462,16 +465,24 @@ namespace CodexProSafeManager
                     "--diagnostic-launch-test-launcher " + valid.PipeName + " " + valid.GateName + " " + Quote(expectedServerScript));
                 using (Process launcher = Process.Start(launcherStart))
                 {
+                    LastStage = "valid-bind";
                     valid.BindConnector(launcher);
-                    Assert(launcher.WaitForExit(5000) && launcher.ExitCode == 0, "managed launch proof valid production-depth instance");
+                    LastStage = "valid-exit";
+                    bool exited = launcher.WaitForExit(5000);
+                    if (!exited) LastStage = "valid-exit-timeout";
+                    else if (launcher.ExitCode != 0) LastStage = "valid-exit-code-" + launcher.ExitCode;
+                    Assert(exited && launcher.ExitCode == 0, "managed launch proof valid production-depth instance");
                 }
+                LastStage = "replay";
                 Assert(RunClient(executable, valid.PipeName, new string('0', 64)) != 0, "managed launch proof replay rejection");
             }
 
             using (DiagnosticLaunchBroker stale = new DiagnosticLaunchBroker(settings, executable, executable, repository, 50, 1))
             {
+                LastStage = "stale-bind";
                 stale.BindConnector(Process.GetCurrentProcess());
                 Thread.Sleep(100);
+                LastStage = "stale-reject";
                 Assert(RunClient(executable, stale.PipeName, new string('0', 64)) != 0, "managed launch proof staleness rejection");
             }
 
@@ -481,7 +492,9 @@ namespace CodexProSafeManager
             {
                 try
                 {
+                    LastStage = "mismatch-bind";
                     mismatch.BindConnector(sleeper);
+                    LastStage = "mismatch-reject";
                     Assert(RunClient(executable, mismatch.PipeName, new string('0', 64)) != 0, "managed launch proof parent and instance mismatch rejection");
                 }
                 finally
@@ -493,7 +506,9 @@ namespace CodexProSafeManager
 
             using (DiagnosticLaunchBroker wrongCapability = new DiagnosticLaunchBroker(settings, executable, executable, repository, 1000, 1))
             {
+                LastStage = "capability-bind";
                 wrongCapability.BindConnector(Process.GetCurrentProcess());
+                LastStage = "capability-reject";
                 Assert(RunClient(executable, wrongCapability.PipeName, new string('0', 64)) != 0,
                     "managed launch proof private capability rejection");
             }
