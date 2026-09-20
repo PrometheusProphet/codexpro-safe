@@ -25,7 +25,7 @@ foreach ($required in @(
     'manifestSha256',
     'settingsSha256',
     'settingsSddl',
-    '[System.IO.File]::Replace',
+    '[System.IO.File]::Copy',
     "Reason 'pre-update'",
     "Reason 'pre-rollback'"
 )) {
