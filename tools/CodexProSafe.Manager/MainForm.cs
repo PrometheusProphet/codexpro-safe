@@ -19,6 +19,8 @@ namespace CodexProSafeManager
         private readonly Label tunnelDetail = new Label();
         private readonly PrivateLogView log = new PrivateLogView();
         private readonly NotifyIcon tray = new NotifyIcon();
+        private readonly Icon applicationIcon;
+        private Icon trayIcon;
         private readonly Timer timer = new Timer();
         private bool busy;
         private bool exiting;
@@ -40,7 +42,9 @@ namespace CodexProSafeManager
             ClientSize = new Size(760, 590);
             MinimumSize = new Size(680, 520);
             Font = new Font("Segoe UI", 9F);
-            Icon = SystemIcons.Shield;
+            applicationIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ??
+                (Icon)SystemIcons.Shield.Clone();
+            Icon = applicationIcon;
 
             BuildUi();
             BuildTray();
@@ -174,7 +178,8 @@ namespace CodexProSafeManager
 
         private void BuildTray()
         {
-            tray.Icon = SystemIcons.Shield;
+            trayIcon = (Icon)applicationIcon.Clone();
+            tray.Icon = trayIcon;
             tray.Text = "CodexPro-Safe Manager";
             tray.Visible = true;
             tray.DoubleClick += delegate { RestoreFromTray(); };
@@ -405,6 +410,9 @@ namespace CodexProSafeManager
             {
                 timer.Dispose();
                 tray.Dispose();
+                if (trayIcon != null) trayIcon.Dispose();
+                Icon = null;
+                applicationIcon.Dispose();
                 supervisor.Dispose();
             }
             base.Dispose(disposing);

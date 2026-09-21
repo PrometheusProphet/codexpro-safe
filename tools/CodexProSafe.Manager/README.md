@@ -54,6 +54,11 @@ The executable is generated at:
 tools\CodexProSafe.Manager\bin\CodexProSafe.Manager.exe
 ```
 
+The executable embeds the branded shield artwork from
+`Assets\CodexProSafe.Manager.ico`. The main window, notification-area icon, and
+installed Desktop shortcut all use that same embedded identity; the transparent
+high-resolution master remains at `Assets\CodexProSafe.Manager.png`.
+
 The same build explicitly compiles and self-tests the app-local diagnostic
 companion at `bin\CodexProSafe.DiagnosticHelper.exe`, then writes its protocols
 and SHA-256 manifest. It also compiles and self-tests

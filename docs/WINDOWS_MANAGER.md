@@ -74,6 +74,10 @@ installs the executable under:
 %LOCALAPPDATA%\Programs\CodexProSafe Manager
 ```
 
+The Manager executable embeds the branded neon shield icon. Windows uses the
+same embedded artwork for the app window, notification area, and Desktop
+shortcut.
+
 For a separately authorized diagnostic activation, the installer accepts only
 the fixed optional mode parameter:
 

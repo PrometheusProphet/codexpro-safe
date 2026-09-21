@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -15,6 +16,12 @@ namespace CodexProSafeManager
             try
             {
                 AppSettings settings = AppSettings.CreateDefaults();
+                currentStage = "embedded-icon";
+                using (Icon icon = Icon.ExtractAssociatedIcon(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName))
+                {
+                    Assert(icon != null && icon.Width >= 16 && icon.Height >= 16, "embedded application icon");
+                }
+                currentStage = "core-defaults";
                 Assert(settings.CodexDiagnosticReadMode == "off", "diagnostic default");
                 Assert(settings.ConnectorAccessMode == "planning", "planning access default");
                 Assert(settings.WorkspaceRoot == settings.RepositoryPath && settings.AllowedRoot == settings.RepositoryPath, "repository root defaults");

@@ -118,9 +118,13 @@ $references = @(
 $referenceArgs = $references | ForEach-Object { '/reference:' + $_ }
 $output = Join-Path $bin 'CodexProSafe.Manager.exe'
 $manifest = Join-Path $project 'app.manifest'
+$icon = Join-Path $project 'Assets\CodexProSafe.Manager.ico'
+if (-not (Test-Path -LiteralPath $icon -PathType Leaf)) {
+    throw "Manager icon was not found at $icon."
+}
 
 & $compiler /nologo /target:winexe /platform:anycpu /optimize+ /warn:4 `
-    ('/out:' + $output) ('/win32manifest:' + $manifest) `
+    ('/out:' + $output) ('/win32manifest:' + $manifest) ('/win32icon:' + $icon) `
     $referenceArgs $sources
 if ($LASTEXITCODE -ne 0) {
     throw "Manager compilation failed with exit code $LASTEXITCODE."
